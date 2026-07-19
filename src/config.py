@@ -12,6 +12,12 @@ load_dotenv()  # reads a local .env file if present, no-op otherwise
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+# Supabase connection string, from Project Settings -> Database -> Connection
+# string -> "Session pooler" (works over IPv4, recommended for local scripts
+# like this one). Format looks like:
+#   postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
 EMBED_MODEL = "gemini-embedding-001"
 GEN_MODEL = "gemini-2.5-flash"
 

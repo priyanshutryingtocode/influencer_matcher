@@ -1,32 +1,28 @@
-"""Hybrid retrieval: structured metadata filters (budget, platform) applied
-first, then semantic search over the filtered pool.
+"""Hybrid retrieval: metadata filters + semantic search.
 
-Filtering first matters -- there's no point spending an embedding call and
-comparing vectors against creators who don't fit the budget in the first
-place. Real vector DBs (Pinecone, Weaviate, pgvector) support this natively
-via metadata filters alongside the vector index.
+Both halves now run as a single Postgres query (see vector_store.search) --
+this module's job is just to embed the brief's query text and hand it off.
 """
 
+import psycopg
 from google import genai
 
-from .embeddings import cosine_sim, embed_texts
+from . import vector_store
+from .embeddings import embed_texts
 from .models import Brief, Influencer
 
 
 def hybrid_retrieve(
     client: genai.Client,
+    conn: psycopg.Connection,
     brief: Brief,
-    influencers: list[Influencer],
     top_k: int = 10,
 ) -> list[Influencer]:
-    pool = [inf for inf in influencers if inf.rate <= brief.budget_max]
-    if brief.platform != "Any":
-        pool = [inf for inf in pool if inf.platform == brief.platform]
-
-    if not pool:
-        return []
-
     query_vec = embed_texts(client, [brief.query_text()], task_type="RETRIEVAL_QUERY")[0]
-    scored = [(inf, cosine_sim(query_vec, inf.embedding)) for inf in pool]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return [inf for inf, _ in scored[:top_k]]
+    return vector_store.search(
+        conn,
+        query_embedding=query_vec,
+        budget_max=brief.budget_max,
+        platform=brief.platform,
+        top_k=top_k,
+    )
