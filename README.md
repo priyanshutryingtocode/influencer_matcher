@@ -12,10 +12,8 @@ when you're ready.
 ```
 influencer_matcher/
 ├── main.py                  # CLI entry point, wires the pipeline together
-├── docker-compose.yml        # optional: local Postgres+pgvector, if not using Supabase
+├── app.py                   # Streamlit interface
 ├── requirements.txt
-├── .env.example
-├── pytest.ini
 ├── src/
 │   ├── config.py             # model names, defaults, env loading
 │   ├── models.py              # Influencer and Brief data classes
@@ -26,9 +24,6 @@ influencer_matcher/
 │   ├── retrieval.py           # hybrid retrieval: embeds the brief, calls vector_store
 │   ├── ranking.py             # LLM ranking/reasoning step (structured JSON)
 │   └── formatting.py          # stdout display helpers
-└── tests/
-    ├── test_pipeline.py       # offline tests, no external services required
-    └── test_vector_store.py   # integration tests, need a live database
 ```
 
 ## Setup
@@ -55,10 +50,11 @@ influencer_matcher/
    pip install -r requirements.txt
    ```
 
-5. Get a Gemini API key from https://aistudio.google.com/apikey, then:
+5. Get a Gemini API key from https://aistudio.google.com/apikey, then create
+   a `.env` file containing:
    ```
-   cp .env.example .env
-   # edit .env: paste your GEMINI_API_KEY and Supabase DATABASE_URL
+   GEMINI_API_KEY=your_api_key
+   DATABASE_URL=your_supabase_connection_string
    ```
 
 6. Run it:
@@ -97,26 +93,6 @@ Supabase gives you three connection options — this matters more than it looks:
   On Supabase's free tier this is IPv6-only, so it often won't work from a
   typical home network or CI runner — Session pooler is the more portable
   choice.
-
-### Local Postgres instead of Supabase
-
-`docker-compose.yml` still works if you'd rather run Postgres locally
-(`docker compose up -d`, then set `DATABASE_URL` to
-`postgresql://postgres:postgres@localhost:5432/influencer_matcher`). The
-schema and queries are identical either way — Supabase *is* Postgres, so
-nothing in `vector_store.py` changes based on which one you use.
-
-## Running tests
-
-```
-pytest
-```
-
-`test_pipeline.py` covers the deterministic/offline parts (data generation,
-cosine similarity) and needs nothing running. `test_vector_store.py` needs
-a live database at `DATABASE_URL` (Supabase or local) and skips itself
-automatically if it can't connect, so `pytest` is always safe to run even
-before the database is set up.
 
 ## How the pipeline works
 

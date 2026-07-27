@@ -17,6 +17,7 @@ def hybrid_retrieve(
     conn: psycopg.Connection,
     brief: Brief,
     top_k: int = 10,
+    table: str = vector_store.DEFAULT_TABLE,
 ) -> list[Influencer]:
     query_vec = embed_texts(client, [brief.query_text()], task_type="RETRIEVAL_QUERY")[0]
     return vector_store.search(
@@ -25,4 +26,5 @@ def hybrid_retrieve(
         budget_max=brief.budget_max,
         platform=brief.platform,
         top_k=top_k,
+        table=table,
     )

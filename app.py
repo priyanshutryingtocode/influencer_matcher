@@ -45,18 +45,21 @@ with st.sidebar:
     st.subheader("Database")
     st.metric("Indexed creators", indexed_count)
     build_count = st.number_input(
-        "Profiles to generate", min_value=10, max_value=500, value=config.DEFAULT_INFLUENCER_COUNT, step=10
+        "Profiles to generate", min_value=10, max_value=config.MAX_INFLUENCER_COUNT, value=config.DEFAULT_INFLUENCER_COUNT, step=10
     )
     build_label = "Rebuild database" if indexed_count else "Build database"
     if st.button(build_label, use_container_width=True):
         client = get_gemini_client()
-        with st.spinner("Generating synthetic profiles..."):
-            influencers = generate_influencers(count=build_count)
-        with st.spinner(f"Embedding {len(influencers)} profiles with Gemini..."):
-            index_influencers(client, influencers)
-        with st.spinner("Storing in Postgres..."):
-            with vector_store.get_connection() as conn:
-                vector_store.init_schema(conn)
+        with vector_store.get_connection() as conn:
+            vector_store.init_schema(conn)
+            if indexed_count:
+                with st.spinner("Clearing existing profiles..."):
+                    vector_store.clear_table(conn)
+            with st.spinner("Generating synthetic profiles..."):
+                influencers = generate_influencers(count=build_count)
+            with st.spinner(f"Embedding {len(influencers)} profiles with Gemini..."):
+                index_influencers(client, influencers)
+            with st.spinner("Storing in the database..."):
                 vector_store.upsert_influencers(conn, influencers)
         st.success(f"Indexed {len(influencers)} profiles.")
         st.rerun()

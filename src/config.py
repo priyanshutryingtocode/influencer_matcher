@@ -29,3 +29,13 @@ EMBED_DIMENSIONS = 768
 DEFAULT_INFLUENCER_COUNT = 60
 DEFAULT_TOP_K_RETRIEVAL = 10
 DEFAULT_TOP_N_RANKED = 5
+
+# Hard ceilings so a mistyped CLI flag can't trigger an unexpectedly large
+# (and unexpectedly expensive) batch of embedding/generation calls.
+MAX_INFLUENCER_COUNT = 500
+MAX_TOP_K = 50
+
+# Gemini client resilience: fail fast instead of hanging, retry transient
+# errors instead of crashing the whole run over one flaky request.
+GEMINI_TIMEOUT_MS = 30_000
+GEMINI_RETRY_ATTEMPTS = 3
