@@ -69,8 +69,8 @@ def _validate_identifier(name: str) -> None:
 def get_connection() -> psycopg.Connection:
     if not config.DATABASE_URL:
         raise RuntimeError(
-            "DATABASE_URL is not set. Copy .env.example to .env and paste in "
-            "your Supabase connection string (click Connect on your project's "
+            "DATABASE_URL is not set. Create a .env file and paste in your "
+            "Supabase connection string (click Connect on your project's "
             "dashboard, then the Session pooler tab)."
         )
     # prepare_threshold=None disables psycopg's automatic prepared statements.
@@ -101,6 +101,21 @@ def clear_table(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
     count doesn't leave stale rows behind from a previous, larger run."""
     _validate_identifier(table)
     conn.execute(f"TRUNCATE {table}")
+
+
+def replace_influencers(
+    conn: psycopg.Connection, influencers: list[Influencer], table: str = DEFAULT_TABLE
+) -> None:
+    """Atomically replace all profiles only after replacement embeddings exist.
+
+    Callers generate and embed profiles before calling this function. If that
+    work fails, the current index stays intact; once this function starts,
+    truncation and upsert either both commit or both roll back.
+    """
+    _validate_identifier(table)
+    with conn.transaction():
+        clear_table(conn, table)
+        upsert_influencers(conn, influencers, table)
 
 
 def count_influencers(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> int:

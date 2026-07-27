@@ -9,8 +9,8 @@ from . import config
 def get_client() -> genai.Client:
     if not config.GEMINI_API_KEY:
         raise RuntimeError(
-            "GEMINI_API_KEY is not set. Copy .env.example to .env and add your "
-            "key, or export GEMINI_API_KEY directly. Get a key at "
+            "GEMINI_API_KEY is not set. Create a .env file and add your key, "
+            "or export GEMINI_API_KEY directly. Get a key at "
             "https://aistudio.google.com/apikey"
         )
     return genai.Client(

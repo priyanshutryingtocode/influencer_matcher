@@ -11,12 +11,17 @@ here instead of in every caller.
 """
 
 import json
+import logging
+from collections.abc import Callable
 
 from google import genai
+from google.genai import errors
 from google.genai import types
 
 from . import config
 from .models import Brief, Influencer
+
+logger = logging.getLogger(__name__)
 
 RANKING_SCHEMA = {
     "type": "object",
@@ -89,6 +94,7 @@ def rank_candidates(
     brief: Brief,
     candidates: list[Influencer],
     top_n: int = 5,
+    on_fallback: Callable[[], None] | None = None,
 ) -> list[dict]:
     valid_ids = {c.id for c in candidates}
 
@@ -103,23 +109,34 @@ def rank_candidates(
         )
         parsed = json.loads(response.text)
         raw_ranked = parsed["ranked"]
-    except Exception:
-        # Network/timeout error, malformed JSON, missing "ranked" key, etc --
-        # any failure here means we can't trust the response, not that the
-        # whole matching run should crash.
+        if not isinstance(raw_ranked, list):
+            raise TypeError("Ranking response field 'ranked' must be a list")
+    except (errors.APIError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        logger.warning("Gemini ranking failed; falling back to semantic retrieval order", exc_info=True)
+        if on_fallback:
+            on_fallback()
         return _fallback_ranking(candidates, top_n)
 
     seen: set[int] = set()
     cleaned: list[dict] = []
     for entry in raw_ranked:
+        if not isinstance(entry, dict):
+            continue
         entry_id = entry.get("id")
         if entry_id not in valid_ids or entry_id in seen:
             continue  # unknown id (hallucinated) or duplicate -- drop it
         seen.add(entry_id)
-        cleaned.append({"id": entry_id, "rationale": entry.get("rationale", "")})
+        rationale = entry.get("rationale", "")
+        cleaned.append({"id": entry_id, "rationale": rationale if isinstance(rationale, str) else ""})
         if len(cleaned) >= top_n:
             break
 
-    if not cleaned:
-        return _fallback_ranking(candidates, top_n)
+    for candidate in candidates:
+        if len(cleaned) >= top_n:
+            break
+        if candidate.id not in seen:
+            cleaned.append({
+                "id": candidate.id,
+                "rationale": "Selected by retrieval ranking (LLM did not return this candidate).",
+            })
     return cleaned
