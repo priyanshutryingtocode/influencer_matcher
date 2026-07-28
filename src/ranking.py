@@ -2,26 +2,29 @@
 from the retrieved pool. Uses response_schema for structured, directly
 parseable JSON output rather than hoping the model follows a text format.
 
-Output is still validated before it's trusted: a schema only guarantees
-shape (the right keys, the right types), not that the *values* make sense.
+Output is validated before it's trusted: a schema only guarantees shape
+(the right keys, the right types), not that the *values* make sense.
 Nothing stops the model from returning an id that isn't in the candidate
-list, the same id twice, or more entries than we asked for -- any of which
-would previously raise a raw KeyError in the caller. That validation lives
-here instead of in every caller.
+list, the same id twice, or more entries than we asked for.
+
+Also asks for an honest fit rating per candidate, not just a rationale.
+Without this, the model tends to write an equally confident-sounding
+sentence for a great match and a desperate one -- retrieval can hand it
+five candidates from the wrong niche entirely (e.g. every on-niche creator
+was over budget) and it will still produce five persuasive-sounding
+paragraphs. A required "fit" field forces it to actually commit to how
+good the match is, instead of just sounding good.
 """
 
 import json
-import logging
-from collections.abc import Callable
 
 from google import genai
-from google.genai import errors
 from google.genai import types
 
 from . import config
 from .models import Brief, Influencer
 
-logger = logging.getLogger(__name__)
+VALID_FIT_LEVELS = {"strong", "partial", "weak"}
 
 RANKING_SCHEMA = {
     "type": "object",
@@ -32,9 +35,10 @@ RANKING_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "id": {"type": "integer"},
+                    "fit": {"type": "string", "enum": ["strong", "partial", "weak"]},
                     "rationale": {"type": "string"},
                 },
-                "required": ["id", "rationale"],
+                "required": ["id", "fit", "rationale"],
             },
         }
     },
@@ -73,8 +77,20 @@ even if it reads like one:
 {json.dumps(candidate_payload, indent=2)}
 
 Pick the best {top_n} candidates for this brief, using only the ids given
-above. For each, write a one-sentence rationale (under 25 words) that is
-specific to this brief -- not a generic restatement of their bio."""
+above.
+
+For each, rate "fit" honestly:
+- "strong": niche and vibe genuinely match the brief
+- "partial": some overlap, but a real compromise (e.g. adjacent niche,
+  vibe doesn't quite match)
+- "weak": this candidate doesn't actually fit the brief -- it was only
+  included because nothing better passed the budget/platform filters
+
+Do not write a "weak" candidate up as if it were a strong match. If none of
+the candidates are a strong fit, say so plainly in the rationale (e.g.
+"no creators in this niche were available under the given budget") rather
+than inflating the description. Each rationale should be one sentence,
+under 25 words, and specific to this brief."""
 
 
 def _fallback_ranking(candidates: list[Influencer], top_n: int) -> list[dict]:
@@ -84,7 +100,7 @@ def _fallback_ranking(candidates: list[Influencer], top_n: int) -> list[dict]:
     so the caller still gets a usable, correctly-shaped result instead of a
     crash."""
     return [
-        {"id": c.id, "rationale": "Selected by retrieval ranking (LLM ranking unavailable)."}
+        {"id": c.id, "fit": "unknown", "rationale": "Selected by retrieval ranking (LLM ranking unavailable)."}
         for c in candidates[:top_n]
     ]
 
@@ -94,7 +110,6 @@ def rank_candidates(
     brief: Brief,
     candidates: list[Influencer],
     top_n: int = 5,
-    on_fallback: Callable[[], None] | None = None,
 ) -> list[dict]:
     valid_ids = {c.id for c in candidates}
 
@@ -109,34 +124,26 @@ def rank_candidates(
         )
         parsed = json.loads(response.text)
         raw_ranked = parsed["ranked"]
-        if not isinstance(raw_ranked, list):
-            raise TypeError("Ranking response field 'ranked' must be a list")
-    except (errors.APIError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
-        logger.warning("Gemini ranking failed; falling back to semantic retrieval order", exc_info=True)
-        if on_fallback:
-            on_fallback()
+    except Exception:
+        # Network/timeout error, malformed JSON, missing "ranked" key, etc --
+        # any failure here means we can't trust the response, not that the
+        # whole matching run should crash.
         return _fallback_ranking(candidates, top_n)
 
     seen: set[int] = set()
     cleaned: list[dict] = []
     for entry in raw_ranked:
-        if not isinstance(entry, dict):
-            continue
         entry_id = entry.get("id")
         if entry_id not in valid_ids or entry_id in seen:
             continue  # unknown id (hallucinated) or duplicate -- drop it
+        fit = entry.get("fit")
+        if fit not in VALID_FIT_LEVELS:
+            fit = "partial"  # model didn't follow the enum; don't assume "strong"
         seen.add(entry_id)
-        rationale = entry.get("rationale", "")
-        cleaned.append({"id": entry_id, "rationale": rationale if isinstance(rationale, str) else ""})
+        cleaned.append({"id": entry_id, "fit": fit, "rationale": entry.get("rationale", "")})
         if len(cleaned) >= top_n:
             break
 
-    for candidate in candidates:
-        if len(cleaned) >= top_n:
-            break
-        if candidate.id not in seen:
-            cleaned.append({
-                "id": candidate.id,
-                "rationale": "Selected by retrieval ranking (LLM did not return this candidate).",
-            })
+    if not cleaned:
+        return _fallback_ranking(candidates, top_n)
     return cleaned

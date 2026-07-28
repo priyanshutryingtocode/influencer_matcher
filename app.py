@@ -9,13 +9,20 @@ import streamlit as st
 from src import config, vector_store
 from src.data_generator import NICHES, PLATFORMS, generate_influencers
 from src.embeddings import index_influencers
-from src.formatting import format_followers
+from src.formatting import format_followers, niche_coverage
 from src.gemini_client import get_client
 from src.models import Brief
 from src.ranking import rank_candidates
 from src.retrieval import hybrid_retrieve
 
-st.set_page_config(page_title="Influencer Matcher", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Influencer Matcher", page_icon="\U0001F3AF", layout="wide")
+
+FIT_STYLE = {
+    "strong": ("\U0001F7E2", "Strong fit"),
+    "partial": ("\U0001F7E1", "Partial fit"),
+    "weak": ("\U0001F534", "Weak fit"),
+    "unknown": ("\u26AA", "Fit unknown"),
+}
 
 
 @st.cache_resource
@@ -36,7 +43,7 @@ def get_indexed_count() -> int:
         st.stop()
 
 
-st.title("🎯 Influencer Matcher")
+st.title("\U0001F3AF Influencer Matcher")
 st.caption("RAG-powered creator matching: Postgres/pgvector retrieval + Gemini reasoning")
 
 indexed_count = get_indexed_count()
@@ -50,14 +57,17 @@ with st.sidebar:
     build_label = "Rebuild database" if indexed_count else "Build database"
     if st.button(build_label, use_container_width=True):
         client = get_gemini_client()
-        with st.spinner("Generating synthetic profiles..."):
-            influencers = generate_influencers(count=build_count)
-        with st.spinner(f"Embedding {len(influencers)} profiles with Gemini..."):
-            index_influencers(client, influencers)
-        with st.spinner("Replacing profiles in the database..."):
-            with vector_store.get_connection() as conn:
-                vector_store.init_schema(conn)
-                vector_store.replace_influencers(conn, influencers)
+        with vector_store.get_connection() as conn:
+            vector_store.init_schema(conn)
+            if indexed_count:
+                with st.spinner("Clearing existing profiles..."):
+                    vector_store.clear_table(conn)
+            with st.spinner("Generating synthetic profiles..."):
+                influencers = generate_influencers(count=build_count)
+            with st.spinner(f"Embedding {len(influencers)} profiles with Gemini..."):
+                index_influencers(client, influencers)
+            with st.spinner("Storing in the database..."):
+                vector_store.upsert_influencers(conn, influencers)
         st.success(f"Indexed {len(influencers)} profiles.")
         st.rerun()
 
@@ -70,7 +80,7 @@ with st.sidebar:
     audience = st.text_input("Target audience", "Gen Z, sustainability-minded")
     vibe = st.text_area("Vibe / tone", "warm, low-key, not overly polished")
     top_k = st.slider("Candidates to retrieve", 5, 30, 10)
-    top_n = st.slider("Final shortlist size", 1, top_k, min(5, top_k))
+    top_n = st.slider("Final shortlist size", 1, 10, 5)
     run = st.button("Run match", type="primary", use_container_width=True)
 
 if indexed_count == 0:
@@ -92,16 +102,17 @@ if not candidates:
     st.warning("No creators fit that budget/platform combination. Try raising the budget.")
     st.stop()
 
-st.caption(f"{len(candidates)} candidates passed filters + retrieval")
+matches, total = niche_coverage(candidates, niche)
+st.caption(f"{total} candidates passed filters + retrieval")
+if matches < total:
+    st.warning(
+        f"Only {matches}/{total} retrieved candidates are actually tagged **{niche}**. "
+        f"The rest passed your budget/platform filters but not the niche — the shortlist below may "
+        f"include compromises. Try raising the budget or check the fit badges on each card."
+    )
 
 with st.spinner("Ranking with Gemini..."):
-    ranked = rank_candidates(
-        client,
-        brief,
-        candidates,
-        top_n=top_n,
-        on_fallback=lambda: st.warning("Gemini ranking was unavailable; showing the best semantic matches instead."),
-    )
+    ranked = rank_candidates(client, brief, candidates, top_n=top_n)
 
 candidates_by_id = {c.id: c for c in candidates}
 
@@ -109,14 +120,19 @@ st.subheader(f"Top {len(ranked)} matches")
 cols = st.columns(min(len(ranked), 3) or 1)
 for i, entry in enumerate(ranked):
     inf = candidates_by_id[entry["id"]]
+    fit = entry.get("fit", "unknown")
+    fit_emoji, fit_label = FIT_STYLE.get(fit, FIT_STYLE["unknown"])
     col = cols[i % len(cols)]
     with col:
         with st.container(border=True):
-            st.markdown(f"**#{i + 1} · {inf.handle}**")
+            st.markdown(f"**#{i + 1} · {inf.handle}**  {fit_emoji} {fit_label}")
             st.caption(f"{inf.niche} · {inf.platform} · {inf.city}")
             m1, m2, m3 = st.columns(3)
             m1.metric("Followers", format_followers(inf.followers))
             m2.metric("Engagement", f"{inf.engagement}%")
             m3.metric("Rate", f"${inf.rate}")
             st.write(" ".join(f"`{t}`" for t in inf.tags))
-            st.info(entry["rationale"])
+            if fit == "weak":
+                st.warning(entry["rationale"])
+            else:
+                st.info(entry["rationale"])

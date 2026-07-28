@@ -65,12 +65,17 @@ def parse_args() -> argparse.Namespace:
 
 def ensure_indexed(client, conn, args) -> None:
     """Only regenerate + re-embed if the table is empty or --reindex was
-    passed. Existing rows remain available until every replacement profile
-    has been generated and embedded successfully."""
+    passed. On --reindex, clears existing rows first -- otherwise a rebuild
+    with a smaller --count than last time would leave stale rows behind
+    that a plain upsert (matched by id) would never touch."""
     existing = vector_store.count_influencers(conn)
     if existing and not args.reindex:
         print(f"Found {existing} indexed profiles, skipping re-embedding.")
         return
+
+    if existing and args.reindex:
+        print(f"Clearing {existing} existing profiles before reindexing...")
+        vector_store.clear_table(conn)
 
     print("Generating synthetic influencer database...")
     influencers = generate_influencers(count=args.count)
@@ -78,9 +83,8 @@ def ensure_indexed(client, conn, args) -> None:
     print(f"Embedding {len(influencers)} profiles with Gemini...")
     index_influencers(client, influencers)
 
-    action = "Replacing" if existing else "Storing"
-    print(f"{action} profiles in the database...")
-    vector_store.replace_influencers(conn, influencers)
+    print("Upserting into the database...")
+    vector_store.upsert_influencers(conn, influencers)
 
 
 def main() -> None:
@@ -111,7 +115,7 @@ def main() -> None:
         ranked = rank_candidates(client, brief, candidates, top_n=args.top_n)
 
     candidates_by_id = {c.id: c for c in candidates}
-    print_results(ranked, candidates_by_id)
+    print_results(ranked, candidates_by_id, niche=args.niche)
 
 
 if __name__ == "__main__":
