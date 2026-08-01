@@ -80,7 +80,6 @@ with st.sidebar:
     st.subheader("Brand brief")
     niche = st.selectbox("Niche", list(NICHES.keys()))
     platform = st.selectbox("Platform", ["Any", *PLATFORMS])
-    budget_max = st.slider("Budget per creator (max $)", 200, 20000, 5000, step=100)
     audience = st.text_input("Target audience", "Gen Z, sustainability-minded")
     vibe = st.text_area("Vibe / tone", "warm, low-key, not overly polished")
     top_k = st.slider("Candidates to retrieve", 5, 30, 10)
@@ -96,14 +95,14 @@ if not run:
     st.stop()
 
 client = get_gemini_client()
-brief = Brief(niche=niche, platform=platform, budget_max=budget_max, audience=audience, vibe=vibe)
+brief = Brief(niche=niche, platform=platform, audience=audience, vibe=vibe)
 
 with st.spinner("Retrieving candidates (Postgres + pgvector)..."):
     with vector_store.get_connection() as conn:
         candidates = hybrid_retrieve(client, conn, brief, top_k=top_k)
 
 if not candidates:
-    st.warning("No creators fit that budget/platform combination. Try raising the budget.")
+    st.warning("No creators found for that platform. Try 'Any' platform, or check the database is indexed.")
     st.stop()
 
 matches, total = niche_coverage(candidates, niche)
@@ -111,8 +110,8 @@ st.caption(f"{total} candidates passed filters + retrieval")
 if matches < total:
     st.warning(
         f"Only {matches}/{total} retrieved candidates are actually tagged **{niche}**. "
-        f"The rest passed your budget/platform filters but not the niche — the shortlist below may "
-        f"include compromises. Try raising the budget or check the fit badges on each card."
+        f"The rest passed your platform filter but ranked in on vibe/audience similarity rather than "
+        f"niche — check the fit badges on each card, or try a different platform."
     )
 
 with st.spinner("Ranking with Gemini..."):

@@ -20,7 +20,6 @@ class Influencer:
     embedding: np.ndarray = None
 
     def corpus_text(self) -> str:
-        """Text representation used for embedding (the RAG 'document')."""
         return (
             f"Creator {self.handle} on {self.platform}, based in {self.city}. "
             f"Niche: {self.niche}. Topics: {', '.join(self.tags)}. {self.bio}"
@@ -30,13 +29,15 @@ class Influencer:
 @dataclass
 class Brief:
     niche: str
-    platform: str  # "Any" or one of the values in data_generator.PLATFORMS
-    budget_max: int
+    platform: str  # "Any" or one of PLATFORMS
     audience: str = ""
     vibe: str = ""
 
     def query_text(self) -> str:
-        """Text representation used as the retrieval query (the RAG 'query')."""
+        """Text representation used as the retrieval query (the RAG 'query').
+        Niche is included here (not enforced as a hard filter) since it's a
+        semantic signal, not a strict eligibility criterion the way platform
+        is."""
         return (
             f"Looking for a {self.niche} creator. Target audience: {self.audience}. "
             f"Vibe / tone: {self.vibe}."

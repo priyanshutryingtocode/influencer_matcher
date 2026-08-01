@@ -2,7 +2,7 @@
 
 Usage:
     python main.py
-    python main.py --niche "Fitness & wellness" --platform TikTok --budget 3000 \\
+    python main.py --niche "Fitness & wellness" --platform TikTok \\
         --audience "millennials, home gym" --vibe "high energy, no-nonsense"
     python main.py --reindex   # clear and regenerate/re-embed the database
 """
@@ -39,7 +39,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Match brand briefs to influencers using Gemini + RAG.")
     parser.add_argument("--niche", default="Sustainable fashion")
     parser.add_argument("--platform", default="Instagram", choices=["Any", *PLATFORMS])
-    parser.add_argument("--budget", type=positive_int(), default=5000, help="Max budget per creator, in USD")
     parser.add_argument("--audience", default="Gen Z, sustainability-minded")
     parser.add_argument("--vibe", default="warm, low-key, not overly polished")
     parser.add_argument(
@@ -95,7 +94,6 @@ def main() -> None:
         brief = Brief(
             niche=args.niche,
             platform=args.platform,
-            budget_max=args.budget,
             audience=args.audience,
             vibe=args.vibe,
         )
@@ -104,7 +102,7 @@ def main() -> None:
         print("\nRetrieving candidates (metadata filter + pgvector search)...")
         candidates = hybrid_retrieve(client, conn, brief, top_k=args.top_k)
         if not candidates:
-            print("No creators fit that budget/platform combination.")
+            print("No creators found for that platform.")
             return
         print(f"  {len(candidates)} candidates returned")
 

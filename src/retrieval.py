@@ -1,6 +1,6 @@
 """Hybrid retrieval: metadata filters + semantic search.
 
-Both halves now run as a single Postgres query (see vector_store.search) --
+Both halves run as a single Postgres query (see vector_store.search) --
 this module's job is just to embed the brief's query text and hand it off.
 """
 
@@ -23,7 +23,6 @@ def hybrid_retrieve(
     return vector_store.search(
         conn,
         query_embedding=query_vec,
-        budget_max=brief.budget_max,
         platform=brief.platform,
         top_k=top_k,
         table=table,

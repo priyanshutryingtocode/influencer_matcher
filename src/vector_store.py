@@ -37,7 +37,6 @@ ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_hash TEXT;
 CREATE INDEX IF NOT EXISTS {table}_embedding_idx
     ON {table} USING hnsw (embedding vector_cosine_ops);
 
-CREATE INDEX IF NOT EXISTS {table}_rate_idx ON {table} (rate);
 CREATE INDEX IF NOT EXISTS {table}_platform_idx ON {table} (platform);
 """
 
@@ -133,7 +132,6 @@ def replace_influencers(
 def search(
     conn: psycopg.Connection,
     query_embedding: np.ndarray,
-    budget_max: int,
     platform: str,
     top_k: int,
     table: str = DEFAULT_TABLE,
@@ -152,11 +150,10 @@ def search(
     sql = f"""
         SELECT id, handle, niche, platform, city, followers, engagement, rate, tags, bio
         FROM {table}
-        WHERE rate <= %s
     """
-    params: list = [budget_max]
+    params: list = []
     if platform != "Any":
-        sql += " AND platform = %s"
+        sql += " WHERE platform = %s"
         params.append(platform)
     sql += " ORDER BY embedding <=> %s LIMIT %s"
     params.extend([query_embedding, top_k])
