@@ -57,17 +57,21 @@ with st.sidebar:
     build_label = "Rebuild database" if indexed_count else "Build database"
     if st.button(build_label, use_container_width=True):
         client = get_gemini_client()
-        with vector_store.get_connection() as conn:
-            vector_store.init_schema(conn)
-            if indexed_count:
-                with st.spinner("Clearing existing profiles..."):
-                    vector_store.clear_table(conn)
-            with st.spinner("Generating synthetic profiles..."):
-                influencers = generate_influencers(count=build_count)
+        # Generate + embed fully before touching the database. If Gemini
+        # fails partway (bad key, network, quota), nothing here has written
+        # anything yet -- the existing indexed data is untouched.
+        with st.spinner("Generating synthetic profiles..."):
+            influencers = generate_influencers(count=build_count)
+        try:
             with st.spinner(f"Embedding {len(influencers)} profiles with Gemini..."):
                 index_influencers(client, influencers)
-            with st.spinner("Storing in the database..."):
-                vector_store.upsert_influencers(conn, influencers)
+        except Exception as e:
+            st.error(f"Embedding failed, database was not modified: {e}")
+            st.stop()
+        with st.spinner("Storing in the database..."):
+            with vector_store.get_connection() as conn:
+                vector_store.init_schema(conn)
+                vector_store.replace_influencers(conn, influencers)
         st.success(f"Indexed {len(influencers)} profiles.")
         st.rerun()
 
@@ -80,7 +84,7 @@ with st.sidebar:
     audience = st.text_input("Target audience", "Gen Z, sustainability-minded")
     vibe = st.text_area("Vibe / tone", "warm, low-key, not overly polished")
     top_k = st.slider("Candidates to retrieve", 5, 30, 10)
-    top_n = st.slider("Final shortlist size", 1, 10, 5)
+    top_n = st.slider("Final shortlist size", 1, top_k, min(5, top_k))
     run = st.button("Run match", type="primary", use_container_width=True)
 
 if indexed_count == 0:
@@ -114,9 +118,23 @@ if matches < total:
 with st.spinner("Ranking with Gemini..."):
     ranked = rank_candidates(client, brief, candidates, top_n=top_n)
 
+fallback_entries = [e for e in ranked if e.get("source") == "fallback"]
+filled_entries = [e for e in ranked if e.get("source") == "filled"]
+if fallback_entries:
+    reason = fallback_entries[0].get("fallback_reason", "unknown error")
+    st.error(
+        f"Gemini ranking failed, so this shortlist is retrieval order, not LLM-reasoned: {reason}"
+    )
+elif filled_entries:
+    st.info(
+        f"The model only ranked {len(ranked) - len(filled_entries)} of {len(ranked)} requested slots; "
+        f"the rest were filled from retrieval order (marked \u26AA below)."
+    )
+
 candidates_by_id = {c.id: c for c in candidates}
 
 st.subheader(f"Top {len(ranked)} matches")
+st.caption("Fit is AI-assessed by the ranking model, cross-checked against niche match.")
 cols = st.columns(min(len(ranked), 3) or 1)
 for i, entry in enumerate(ranked):
     inf = candidates_by_id[entry["id"]]

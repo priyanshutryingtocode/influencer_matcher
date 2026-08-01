@@ -1,14 +1,4 @@
-"""Postgres + pgvector: the persistent home for influencer embeddings.
-
-Embeddings are computed once (embeddings.py) and upserted here; retrieval
-runs as a single SQL query that does the metadata filter (budget, platform)
-and the vector similarity ranking together.
-
-Table name is a parameter (default "influencers") rather than hardcoded --
-this lets tests run against an isolated table instead of ever touching real
-data, which matters a lot once DATABASE_URL points at Supabase instead of a
-disposable local database.
-"""
+"""Postgres + pgvector: the persistent home for influencer embeddings."""
 
 import hashlib
 
@@ -23,9 +13,6 @@ DEFAULT_TABLE = "influencers"
 
 
 def _schema_sql(table: str) -> str:
-    # Identifiers can't be parameterized in SQL, so we validate the table
-    # name is a plain identifier before interpolating it, rather than
-    # accepting arbitrary strings into a DDL statement.
     _validate_identifier(table)
     return f"""
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -44,12 +31,6 @@ CREATE TABLE IF NOT EXISTS {table} (
     embedding VECTOR({config.EMBED_DIMENSIONS}) NOT NULL
 );
 
--- Added after the initial release: which embedding model produced this
--- row's vector, and a hash of the text that was embedded. Lets a future
--- reindex job detect "this row's source text changed" or "this row was
--- embedded with an old model version" instead of blindly re-embedding
--- everything. ADD COLUMN IF NOT EXISTS so this is safe to run against a
--- table created before these columns existed.
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embed_model TEXT;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_hash TEXT;
 
@@ -69,15 +50,10 @@ def _validate_identifier(name: str) -> None:
 def get_connection() -> psycopg.Connection:
     if not config.DATABASE_URL:
         raise RuntimeError(
-            "DATABASE_URL is not set. Create a .env file and paste in your "
-            "Supabase connection string (click Connect on your project's "
+            "DATABASE_URL is not set. Copy .env.example to .env and paste in "
+            "your Supabase connection string (click Connect on your project's "
             "dashboard, then the Session pooler tab)."
         )
-    # prepare_threshold=None disables psycopg's automatic prepared statements.
-    # Supabase's connection pooler (Supavisor) runs in transaction mode by
-    # default, which doesn't support prepared statements across queries --
-    # without this you'll intermittently see "prepared statement does not
-    # exist" errors. Harmless to leave on even against a direct connection.
     conn = psycopg.connect(config.DATABASE_URL, autocommit=True, prepare_threshold=None)
     register_vector(conn)
     return conn
@@ -88,34 +64,13 @@ def init_schema(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
 
 
 def drop_table(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
-    """Used by tests to clean up an isolated test table. Deliberately a
-    separate, explicitly-named function from anything used in the app's
-    normal flow, so it's never reachable by accident."""
     _validate_identifier(table)
     conn.execute(f"DROP TABLE IF EXISTS {table}")
 
 
 def clear_table(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
-    """Empties the table without dropping it (keeps indexes in place).
-    Used by 'rebuild database' flows so a rebuild with a smaller profile
-    count doesn't leave stale rows behind from a previous, larger run."""
     _validate_identifier(table)
     conn.execute(f"TRUNCATE {table}")
-
-
-def replace_influencers(
-    conn: psycopg.Connection, influencers: list[Influencer], table: str = DEFAULT_TABLE
-) -> None:
-    """Atomically replace all profiles only after replacement embeddings exist.
-
-    Callers generate and embed profiles before calling this function. If that
-    work fails, the current index stays intact; once this function starts,
-    truncation and upsert either both commit or both roll back.
-    """
-    _validate_identifier(table)
-    with conn.transaction():
-        clear_table(conn, table)
-        upsert_influencers(conn, influencers, table)
 
 
 def count_influencers(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> int:
@@ -147,21 +102,32 @@ def upsert_influencers(
                  embedding, embed_model, content_hash)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
-                handle = EXCLUDED.handle,
-                niche = EXCLUDED.niche,
-                platform = EXCLUDED.platform,
-                city = EXCLUDED.city,
-                followers = EXCLUDED.followers,
-                engagement = EXCLUDED.engagement,
-                rate = EXCLUDED.rate,
-                tags = EXCLUDED.tags,
-                bio = EXCLUDED.bio,
-                embedding = EXCLUDED.embedding,
-                embed_model = EXCLUDED.embed_model,
+                handle = EXCLUDED.handle, niche = EXCLUDED.niche, platform = EXCLUDED.platform,
+                city = EXCLUDED.city, followers = EXCLUDED.followers, engagement = EXCLUDED.engagement,
+                rate = EXCLUDED.rate, tags = EXCLUDED.tags, bio = EXCLUDED.bio,
+                embedding = EXCLUDED.embedding, embed_model = EXCLUDED.embed_model,
                 content_hash = EXCLUDED.content_hash
             """,
             rows,
         )
+
+
+def replace_influencers(
+    conn: psycopg.Connection, influencers: list[Influencer], table: str = DEFAULT_TABLE
+) -> None:
+    """Atomically swap the table's contents for a fresh set.
+
+    Callers must fully generate + embed `influencers` *before* calling this
+    -- nothing in here should ever run a Gemini call. The clear and the
+    write both happen inside one transaction (conn.transaction(), which
+    works even though get_connection() sets autocommit=True), so if the
+    write fails partway through, the clear is rolled back too and the
+    table is left exactly as it was, not empty.
+    """
+    _validate_identifier(table)
+    with conn.transaction():
+        conn.execute(f"TRUNCATE {table}")
+        upsert_influencers(conn, influencers, table=table)
 
 
 def search(
@@ -172,19 +138,6 @@ def search(
     top_k: int,
     table: str = DEFAULT_TABLE,
 ) -> list[Influencer]:
-    """Metadata filter + vector similarity, pushed down into one query.
-    `<=>` is pgvector's cosine distance operator (smaller = more similar).
-
-    Caveat worth knowing: with an HNSW (approximate-nearest-neighbor) index,
-    Postgres can retrieve the nearest vectors first and apply the WHERE
-    filter afterward, so a selective filter (e.g. a low budget) can return
-    fewer than `top_k` rows even when more would actually qualify. We widen
-    the ANN search (ef_search) proportionally to top_k to make that less
-    likely, and opt into iterative scanning on pgvector versions that
-    support it (0.8+), which keeps scanning until enough post-filter
-    results are found. Both are best-effort session settings -- guarded so
-    this still works against older pgvector without them.
-    """
     _validate_identifier(table)
 
     try:

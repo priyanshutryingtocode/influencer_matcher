@@ -35,7 +35,18 @@ def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], n
         print(f"\nHeads up: only {matches}/{total} retrieved candidates are actually tagged '{niche}'.")
         print("The rest passed your budget/platform filters but not the niche -- consider widening the budget.")
 
-    print(f"\nTop {len(ranked)} matches:\n")
+    fallback_entries = [e for e in ranked if e.get("source") == "fallback"]
+    filled_entries = [e for e in ranked if e.get("source") == "filled"]
+    if fallback_entries:
+        reason = fallback_entries[0].get("fallback_reason", "unknown error")
+        print(f"\nWARNING: Gemini ranking failed ({reason}); this list is retrieval order, not LLM-reasoned.")
+    elif filled_entries:
+        print(
+            f"\nNote: the model only ranked {len(ranked) - len(filled_entries)} of {len(ranked)} requested "
+            f"slots; the rest were filled from retrieval order (marked [filled] below)."
+        )
+
+    print(f"\nTop {len(ranked)} matches (fit is AI-assessed, cross-checked against niche match):\n")
     for i, entry in enumerate(ranked, start=1):
         inf = candidates_by_id[entry["id"]]
         fit_tag = f"[{entry.get('fit', 'unknown')} fit] " if entry.get("fit") else ""

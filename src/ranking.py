@@ -2,27 +2,37 @@
 from the retrieved pool. Uses response_schema for structured, directly
 parseable JSON output rather than hoping the model follows a text format.
 
-Output is validated before it's trusted: a schema only guarantees shape
-(the right keys, the right types), not that the *values* make sense.
-Nothing stops the model from returning an id that isn't in the candidate
-list, the same id twice, or more entries than we asked for.
+Several layers of defense here, because a schema only guarantees *shape*
+(the right keys, the right types at the top level) -- it doesn't guarantee
+the model followed instructions, returned real ids, filled every slot, or
+was honest about fit quality:
 
-Also asks for an honest fit rating per candidate, not just a rationale.
-Without this, the model tends to write an equally confident-sounding
-sentence for a great match and a desperate one -- retrieval can hand it
-five candidates from the wrong niche entirely (e.g. every on-niche creator
-was over budget) and it will still produce five persuasive-sounding
-paragraphs. A required "fit" field forces it to actually commit to how
-good the match is, instead of just sounding good.
+- raw_ranked might not even be a list (e.g. {"ranked": "invalid"}), and
+  individual entries might not be dicts -- both are checked before any
+  attribute access.
+- ids that don't exist in the candidate pool, or repeat ids, are dropped.
+- if the model returns fewer valid entries than top_n, the remaining slots
+  are filled from retrieval order rather than returning a short list.
+- "fit": "strong" is not trusted outright -- a candidate whose niche
+  doesn't match the brief's requested niche is deterministically capped at
+  "partial", regardless of what the model claims. The model is asked to be
+  honest, but this doesn't rely on it being honest.
+- API/parsing failures are caught narrowly (not bare Exception), logged,
+  and produce entries tagged with a "source" field so callers can surface
+  a real warning instead of silently showing a degraded result as if it
+  were a normal one.
 """
 
 import json
+import logging
 
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 from . import config
 from .models import Brief, Influencer
+
+logger = logging.getLogger(__name__)
 
 VALID_FIT_LEVELS = {"strong", "partial", "weak"}
 
@@ -44,6 +54,13 @@ RANKING_SCHEMA = {
     },
     "required": ["ranked"],
 }
+
+# Exceptions we specifically expect from an LLM call that returns
+# structured JSON: the API itself failing, or the response not actually
+# being the JSON we asked for. Anything else (a bug in our own code, for
+# instance) should still raise, not get silently swallowed into a
+# fallback that looks like a normal result.
+EXPECTED_RANKING_ERRORS = (errors.APIError, json.JSONDecodeError, KeyError, TypeError)
 
 
 def _build_prompt(brief: Brief, candidates: list[Influencer], top_n: int) -> str:
@@ -93,14 +110,21 @@ than inflating the description. Each rationale should be one sentence,
 under 25 words, and specific to this brief."""
 
 
-def _fallback_ranking(candidates: list[Influencer], top_n: int) -> list[dict]:
-    """Used when the model's response can't be trusted (unparseable, or
-    every id it returned turned out to be invalid). Falls back to the
+def _fallback_ranking(candidates: list[Influencer], top_n: int, reason: str) -> list[dict]:
+    """Used when the model's response can't be trusted at all (API error,
+    unparseable JSON, or every returned id was invalid). Falls back to the
     retrieval order -- candidates are already sorted by vector similarity --
-    so the caller still gets a usable, correctly-shaped result instead of a
-    crash."""
+    tagged with source="fallback" so callers know to show a real warning
+    rather than presenting this as a normal ranked result."""
+    logger.warning("Ranking fallback triggered: %s", reason)
     return [
-        {"id": c.id, "fit": "unknown", "rationale": "Selected by retrieval ranking (LLM ranking unavailable)."}
+        {
+            "id": c.id,
+            "fit": "unknown",
+            "rationale": "Selected by retrieval ranking (LLM ranking unavailable).",
+            "source": "fallback",
+            "fallback_reason": reason,
+        }
         for c in candidates[:top_n]
     ]
 
@@ -111,7 +135,8 @@ def rank_candidates(
     candidates: list[Influencer],
     top_n: int = 5,
 ) -> list[dict]:
-    valid_ids = {c.id for c in candidates}
+    candidates_by_id = {c.id: c for c in candidates}
+    valid_ids = set(candidates_by_id.keys())
 
     try:
         response = client.models.generate_content(
@@ -124,26 +149,60 @@ def rank_candidates(
         )
         parsed = json.loads(response.text)
         raw_ranked = parsed["ranked"]
-    except Exception:
-        # Network/timeout error, malformed JSON, missing "ranked" key, etc --
-        # any failure here means we can't trust the response, not that the
-        # whole matching run should crash.
-        return _fallback_ranking(candidates, top_n)
+    except EXPECTED_RANKING_ERRORS as e:
+        return _fallback_ranking(candidates, top_n, reason=f"{type(e).__name__}: {e}")
+
+    if not isinstance(raw_ranked, list):
+        return _fallback_ranking(candidates, top_n, reason=f"'ranked' was {type(raw_ranked).__name__}, not a list")
 
     seen: set[int] = set()
     cleaned: list[dict] = []
     for entry in raw_ranked:
+        if not isinstance(entry, dict):
+            continue  # model returned something other than an object -- skip, don't crash
         entry_id = entry.get("id")
         if entry_id not in valid_ids or entry_id in seen:
             continue  # unknown id (hallucinated) or duplicate -- drop it
+
         fit = entry.get("fit")
         if fit not in VALID_FIT_LEVELS:
             fit = "partial"  # model didn't follow the enum; don't assume "strong"
+
+        # Deterministic check, not trust: a candidate whose niche doesn't
+        # match the brief can't be graded "strong" no matter what the model
+        # says. This doesn't depend on the model being honest.
+        candidate = candidates_by_id[entry_id]
+        if fit == "strong" and candidate.niche != brief.niche:
+            fit = "partial"
+
         seen.add(entry_id)
-        cleaned.append({"id": entry_id, "fit": fit, "rationale": entry.get("rationale", "")})
+        cleaned.append({
+            "id": entry_id,
+            "fit": fit,
+            "rationale": entry.get("rationale", ""),
+            "source": "llm",
+        })
         if len(cleaned) >= top_n:
             break
 
     if not cleaned:
-        return _fallback_ranking(candidates, top_n)
+        return _fallback_ranking(candidates, top_n, reason="model returned no valid candidate ids")
+
+    # Model returned fewer valid entries than requested (e.g. top_n=5 but
+    # only 1 valid id came back) -- fill the remaining slots from retrieval
+    # order instead of silently returning a short list.
+    if len(cleaned) < top_n:
+        for c in candidates:
+            if len(cleaned) >= top_n:
+                break
+            if c.id in seen:
+                continue
+            seen.add(c.id)
+            cleaned.append({
+                "id": c.id,
+                "fit": "unknown",
+                "rationale": "Filled from retrieval order (not ranked by the model).",
+                "source": "filled",
+            })
+
     return cleaned
