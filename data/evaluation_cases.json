@@ -1,0 +1,42 @@
+[
+  {
+    "id": "sustainable-fashion",
+    "niche": "Sustainable fashion",
+    "platform": "Any",
+    "audience": "Gen Z shoppers interested in secondhand style",
+    "vibe": "warm, practical, low-waste",
+    "expected_niche": "Sustainable fashion"
+  },
+  {
+    "id": "fitness-tiktok",
+    "niche": "Fitness & wellness",
+    "platform": "TikTok",
+    "audience": "busy millennials building home workout habits",
+    "vibe": "high energy, encouraging, no-nonsense",
+    "expected_niche": "Fitness & wellness"
+  },
+  {
+    "id": "tech-productivity",
+    "niche": "Tech & gadgets",
+    "platform": "Any",
+    "audience": "students and early-career professionals",
+    "vibe": "curious, practical, productivity-focused",
+    "expected_niche": "Tech & gadgets"
+  },
+  {
+    "id": "food-instagram",
+    "niche": "Food & cooking",
+    "platform": "Instagram",
+    "audience": "young professionals looking for quick meals",
+    "vibe": "friendly, approachable, weeknight-focused",
+    "expected_niche": "Food & cooking"
+  },
+  {
+    "id": "travel-youtube",
+    "niche": "Travel",
+    "platform": "YouTube",
+    "audience": "solo travelers planning affordable trips",
+    "vibe": "honest, adventurous, budget-conscious",
+    "expected_niche": "Travel"
+  }
+]
