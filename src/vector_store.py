@@ -148,10 +148,11 @@ def search(
         pass
 
     sql = f"""
-        SELECT id, handle, niche, platform, city, followers, engagement, rate, tags, bio
+        SELECT id, handle, niche, platform, city, followers, engagement, rate, tags, bio,
+               1 - (embedding <=> %s) AS similarity
         FROM {table}
     """
-    params: list = []
+    params: list = [query_embedding]
     if platform != "Any":
         sql += " WHERE platform = %s"
         params.append(platform)
@@ -163,6 +164,7 @@ def search(
         Influencer(
             id=r[0], handle=r[1], niche=r[2], platform=r[3], city=r[4],
             followers=r[5], engagement=float(r[6]), rate=r[7], tags=list(r[8]), bio=r[9],
+            similarity=float(r[10]),
         )
         for r in rows
     ]

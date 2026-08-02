@@ -18,6 +18,7 @@ class Influencer:
     tags: list = field(default_factory=list)
     bio: str = ""
     embedding: np.ndarray = None
+    similarity: float | None = None
 
     def corpus_text(self) -> str:
         return (

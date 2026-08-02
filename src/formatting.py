@@ -1,7 +1,14 @@
 """Display helpers, kept separate from pipeline logic so they're easy to
 swap out (e.g. if you later render results in a web UI instead of stdout)."""
 
+import re
+
 from .models import Brief, Influencer
+
+STOP_WORDS = {
+    "about", "and", "are", "for", "from", "into", "its", "not", "the",
+    "this", "that", "their", "with", "your",
+}
 
 
 def format_followers(n: int) -> str:
@@ -23,6 +30,34 @@ def niche_coverage(candidates: list[Influencer], niche: str) -> tuple[int, int]:
     return matches, len(candidates)
 
 
+def match_evidence(brief: Brief, influencer: Influencer) -> list[str]:
+    """Return deterministic profile evidence for a retrieved result."""
+    evidence: list[str] = []
+    if influencer.niche == brief.niche:
+        evidence.append("Exact niche match")
+
+    brief_terms = _terms(f"{brief.audience} {brief.vibe}")
+    profile_terms = _terms(" ".join([*influencer.tags, influencer.bio]))
+    shared_terms = sorted(brief_terms & profile_terms)
+    if shared_terms:
+        evidence.append(f"Shared brief/profile terms: {', '.join(shared_terms[:4])}")
+
+    matching_tags = [tag for tag in influencer.tags if _terms(tag) & brief_terms]
+    if matching_tags:
+        evidence.append(f"Relevant profile tags: {', '.join(matching_tags[:3])}")
+
+    if not evidence:
+        evidence.append("Retrieved by semantic similarity across the creator profile")
+    return evidence
+
+
+def _terms(text: str) -> set[str]:
+    return {
+        word for word in re.findall(r"[a-z0-9]+", text.lower())
+        if len(word) > 2 and word not in STOP_WORDS
+    }
+
+
 def print_brief(brief: Brief) -> None:
     print("\nBrief:")
     print(f"  Niche: {brief.niche} | Platform: {brief.platform}")
@@ -30,10 +65,10 @@ def print_brief(brief: Brief) -> None:
     print(f"  Vibe: {brief.vibe}")
 
 
-def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], niche: str) -> None:
-    matches, total = niche_coverage(list(candidates_by_id.values()), niche)
+def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], brief: Brief) -> None:
+    matches, total = niche_coverage(list(candidates_by_id.values()), brief.niche)
     if total and matches < total:
-        print(f"\nHeads up: only {matches}/{total} retrieved candidates are actually tagged '{niche}'.")
+        print(f"\nHeads up: only {matches}/{total} retrieved candidates are actually tagged '{brief.niche}'.")
         print("The rest passed your platform filter but didn't match the niche as closely.")
 
     fallback_entries = [e for e in ranked if e.get("source") == "fallback"]
@@ -56,4 +91,7 @@ def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], n
         fit_tag = f"[{entry.get('fit', 'unknown')} fit] " if entry.get("fit") else ""
         print(f"{i}. {fit_tag}{inf.handle}  ({inf.niche}, {inf.platform})")
         print(f"   {format_followers(inf.followers)} followers · {inf.engagement}% engagement · ${inf.rate}/post")
+        if inf.similarity is not None:
+            print(f"   Semantic relevance: {inf.similarity:.1%}")
+        print(f"   Evidence: {'; '.join(match_evidence(brief, inf))}")
         print(f"   {entry['rationale']}\n")

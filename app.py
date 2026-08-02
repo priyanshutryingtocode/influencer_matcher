@@ -9,7 +9,7 @@ import streamlit as st
 from src import config, vector_store
 from src.data_generator import NICHES, PLATFORMS, generate_influencers
 from src.embeddings import index_influencers
-from src.formatting import format_followers, niche_coverage
+from src.formatting import format_followers, match_evidence, niche_coverage
 from src.gemini_client import get_client
 from src.models import Brief
 from src.ranking import rank_candidates
@@ -149,7 +149,10 @@ for i, entry in enumerate(ranked):
             m1.metric("Followers", format_followers(inf.followers))
             m2.metric("Engagement", f"{inf.engagement}%")
             m3.metric("Rate", f"${inf.rate}")
+            if inf.similarity is not None:
+                st.caption(f"Semantic relevance: {inf.similarity:.1%}")
             st.write(" ".join(f"`{t}`" for t in inf.tags))
+            st.caption("Why retrieved: " + " | ".join(match_evidence(brief, inf)))
             if fit == "weak":
                 st.warning(entry["rationale"])
             else:

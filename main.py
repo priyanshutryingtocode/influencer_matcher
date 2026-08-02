@@ -110,7 +110,7 @@ def main() -> None:
         ranked = rank_candidates(client, brief, candidates, top_n=args.top_n)
 
     candidates_by_id = {c.id: c for c in candidates}
-    print_results(ranked, candidates_by_id, niche=args.niche)
+    print_results(ranked, candidates_by_id, brief=brief)
 
 
 if __name__ == "__main__":

@@ -157,6 +157,27 @@ automatically if it can't connect, so `pytest` is always safe to run even
 before the database is set up. Both suites run against an isolated
 `influencers_test_*` table, never the real `influencers` table.
 
+## Evaluating retrieval and ranking
+
+Run the versioned golden-brief set after indexing creators:
+
+```
+python evaluate.py
+```
+
+This writes `evaluation-report.json` with per-case and aggregate metrics:
+
+- retrieval niche precision@K and niche hit rate@K;
+- ranked niche precision@N;
+- Gemini fallback rate; and
+- retrieval and ranking latency.
+
+The included synthetic cases define relevance as an exact niche match. For
+real creator data, replace or extend `data/evaluation_cases.json` with
+human-labelled campaign briefs and accepted creator IDs/niches. Keep prior
+reports to compare quality after changing models, prompts, embeddings, or
+retrieval parameters.
+
 ## How the pipeline works
 
 1. **Generate** — `data_generator.py` builds a synthetic database of
@@ -176,7 +197,10 @@ before the database is set up. Both suites run against an isolated
    `[WHERE platform = ...] ORDER BY embedding <=> query LIMIT k`. Platform
    is the only hard filter; niche match is semantic, not guaranteed, so the
    app also reports how many retrieved candidates actually share the
-   requested niche (`niche_coverage`) and warns if that ratio is low.
+   requested niche (`niche_coverage`) and warns if that ratio is low. Each
+   result shows cosine-based semantic relevance plus deterministic evidence
+   from matching niche, tags, bio, audience, and vibe terms; this evidence is
+   derived from stored fields rather than invented by the ranking model.
 4. **Rank** — `ranking.py` sends the top candidates to `gemini-2.5-flash`
    with a JSON schema, asking it to pick the best ones and rate each
    honestly as `strong` / `partial` / `weak`. That rating isn't trusted
