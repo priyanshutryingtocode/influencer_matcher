@@ -49,7 +49,7 @@ def _validate_identifier(name: str) -> None:
 def get_connection() -> psycopg.Connection:
     if not config.DATABASE_URL:
         raise RuntimeError(
-            "DATABASE_URL is not set. Copy .env.example to .env and paste in "
+            "DATABASE_URL is not set. Copy to .env and paste in "
             "your Supabase connection string (click Connect on your project's "
             "dashboard, then the Session pooler tab)."
         )

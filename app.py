@@ -120,10 +120,11 @@ with st.spinner("Ranking with Gemini..."):
 fallback_entries = [e for e in ranked if e.get("source") == "fallback"]
 filled_entries = [e for e in ranked if e.get("source") == "filled"]
 if fallback_entries:
-    reason = fallback_entries[0].get("fallback_reason", "unknown error")
-    st.error(
-        f"Gemini ranking failed, so this shortlist is retrieval order, not LLM-reasoned: {reason}"
-    )
+    # The detailed reason (exception type/message) is already logged
+    # server-side by ranking.py's logger.warning -- not shown here, since
+    # raw exception text can leak internal request/network detail and
+    # isn't actionable for the person using the app.
+    st.error("Gemini ranking is temporarily unavailable, so this shortlist is retrieval order, not LLM-reasoned.")
 elif filled_entries:
     st.info(
         f"The model only ranked {len(ranked) - len(filled_entries)} of {len(ranked)} requested slots; "

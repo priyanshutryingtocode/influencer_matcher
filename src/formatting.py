@@ -39,8 +39,11 @@ def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], n
     fallback_entries = [e for e in ranked if e.get("source") == "fallback"]
     filled_entries = [e for e in ranked if e.get("source") == "filled"]
     if fallback_entries:
-        reason = fallback_entries[0].get("fallback_reason", "unknown error")
-        print(f"\nWARNING: Gemini ranking failed ({reason}); this list is retrieval order, not LLM-reasoned.")
+        # The detailed reason (exception type/message) is already logged
+        # server-side by ranking.py's logger.warning -- it isn't shown here,
+        # since raw exception text can leak internal request/network detail
+        # and isn't actionable for the person running this.
+        print("\nWARNING: Gemini ranking is temporarily unavailable; showing retrieval-order results instead.")
     elif filled_entries:
         print(
             f"\nNote: the model only ranked {len(ranked) - len(filled_entries)} of {len(ranked)} requested "
