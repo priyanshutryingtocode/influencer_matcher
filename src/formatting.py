@@ -90,7 +90,7 @@ def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], b
         inf = candidates_by_id[entry["id"]]
         fit_tag = f"[{entry.get('fit', 'unknown')} fit] " if entry.get("fit") else ""
         print(f"{i}. {fit_tag}{inf.handle}  ({inf.niche}, {inf.platform})")
-        print(f"   {format_followers(inf.followers)} followers · {inf.engagement}% engagement · ${inf.rate}/post")
+        print(f"   {format_followers(inf.followers)} followers · {inf.engagement}% engagement")
         if inf.similarity is not None:
             print(f"   Semantic relevance: {inf.similarity:.1%}")
         print(f"   Evidence: {'; '.join(match_evidence(brief, inf))}")

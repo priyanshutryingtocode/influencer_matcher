@@ -14,11 +14,25 @@ class Influencer:
     city: str
     followers: int
     engagement: float
-    rate: int
     tags: list = field(default_factory=list)
     bio: str = ""
     embedding: np.ndarray = None
     similarity: float | None = None
+    name: str = ""
+    secondary_niches: list[str] = field(default_factory=list)
+    country: str = ""
+    language: str = ""
+    average_views: int = 0
+    average_likes: int = 0
+    average_comments: int = 0
+    verified: bool = False
+    posts_per_week: int = 0
+    account_age_years: int = 0
+    content_style: str = ""
+    audience_age: str = ""
+    audience_gender: str = ""
+    audience_country: str = ""
+    brand_collaborations: list[str] = field(default_factory=list)
 
     def corpus_text(self) -> str:
         return (
