@@ -2,7 +2,7 @@
 
 Usage:
     python main.py
-    python main.py --niche "Fitness & wellness" --platform TikTok \\
+    python main.py --niche Fitness --platform TikTok \\
         --audience "millennials, home gym" --vibe "high energy, no-nonsense"
     python main.py --reindex   # clear and regenerate/re-embed the database
 """
@@ -10,7 +10,7 @@ Usage:
 import argparse
 
 from src import config, vector_store
-from src.data_generator import PLATFORMS, generate_influencers
+from src.data_generator import NICHES, PLATFORMS, generate_influencers
 from src.embeddings import index_influencers
 from src.formatting import print_brief, print_results
 from src.gemini_client import get_client
@@ -37,7 +37,7 @@ def positive_int(max_value: int | None = None):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Match brand briefs to influencers using Gemini + RAG.")
-    parser.add_argument("--niche", default="Sustainable fashion")
+    parser.add_argument("--niche", default="Sustainable Fashion", choices=list(NICHES))
     parser.add_argument("--platform", default="Instagram", choices=["Any", *PLATFORMS])
     parser.add_argument("--audience", default="Gen Z, sustainability-minded")
     parser.add_argument("--vibe", default="warm, low-key, not overly polished")

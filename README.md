@@ -3,10 +3,7 @@
 A small RAG pipeline that matches a brand brief to influencer profiles:
 platform is a hard filter, niche/audience/vibe are matched semantically via
 Postgres + pgvector, and Gemini generation ranks the final shortlist with an
-honest fit rating and a rationale per pick. Budget is intentionally *not*
-part of matching — rate is shown on each result for reference, but it's
-treated as something to negotiate after a good creative fit is found, not
-a filter that excludes candidates. Currently runs on a synthetic, seeded
+honest fit rating and a rationale per pick. Currently runs on a synthetic, seeded
 influencer database — swap `src/data_generator.py` for a real data source
 when you're ready.
 
@@ -97,7 +94,7 @@ influencer_matcher/
 
    Or with a custom brief:
    ```
-   python main.py --niche "Fitness & wellness" --platform TikTok \
+   python main.py --niche Fitness --platform TikTok \
        --audience "millennials, home gym" --vibe "high energy, no-nonsense"
    ```
 
@@ -139,7 +136,7 @@ streamlit run app.py
 
 Sidebar form for the brand brief (niche, platform, audience, vibe — no
 budget field) plus a **Build/Rebuild database** button. Results render as
-cards with follower/engagement/rate metrics, a 🟢🟡🔴 fit badge, and the
+cards with follower and engagement metrics, a 🟢🟡🔴 fit badge, and the
 Gemini-written rationale per pick. It reuses `src/` entirely — same
 retrieval, same ranking, same database connection logic as the CLI.
 
@@ -181,9 +178,8 @@ retrieval parameters.
 ## How the pipeline works
 
 1. **Generate** — `data_generator.py` builds a synthetic database of
-   influencer profiles (niche, platform, followers, engagement, rate card).
-   Rate is generated and stored for display, but nothing downstream filters
-   on it.
+   influencer profiles using Faker for realistic handles, cities, and bios,
+   plus seeded local logic for niche, platform, followers, engagement, and tags.
 2. **Index** (once, not per-run) — `embeddings.py` embeds every profile
    with `gemini-embedding-001`, entirely in memory. Only once that's fully
    succeeded does `vector_store.replace_influencers()` write to the
@@ -218,12 +214,6 @@ retrieval parameters.
   platform APIs (Instagram Graph API, TikTok, YouTube Data API) or an
   influencer-data provider (Upfluence, Modash, HypeAuditor). Keep returning
   a list of `Influencer` objects and nothing downstream changes.
-- **Bringing budget back as a soft signal**: if you want rate to influence
-  ranking without hard-excluding anyone, the cleanest place is
-  `ranking.py`'s prompt — add it back as context the model should weigh,
-  not a SQL filter. Re-adding it as a `WHERE rate <= ...` filter reproduces
-  the original problem (budget squeezing out otherwise-good niche matches
-  before the model ever sees them).
 - **Incremental re-indexing**: right now a rebuild replaces every row.
   For a real, growing dataset you'd want to embed and upsert only new or
   changed rows — worth adding an `updated_at` column and a scheduled job

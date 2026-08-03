@@ -145,13 +145,18 @@ for i, entry in enumerate(ranked):
         with st.container(border=True):
             st.markdown(f"**#{i + 1} · {inf.handle}**  {fit_emoji} {fit_label}")
             st.caption(f"{inf.niche} · {inf.platform} · {inf.city}")
-            m1, m2, m3 = st.columns(3)
+            m1, m2 = st.columns(2)
             m1.metric("Followers", format_followers(inf.followers))
             m2.metric("Engagement", f"{inf.engagement}%")
-            m3.metric("Rate", f"${inf.rate}")
             if inf.similarity is not None:
                 st.caption(f"Semantic relevance: {inf.similarity:.1%}")
+            st.caption(
+                f"{inf.content_style} | {inf.language} | audience: {inf.audience_age}, "
+                f"{inf.audience_gender}, {inf.audience_country}"
+            )
             st.write(" ".join(f"`{t}`" for t in inf.tags))
+            if inf.brand_collaborations:
+                st.caption("Past collaborations: " + ", ".join(inf.brand_collaborations))
             st.caption("Why retrieved: " + " | ".join(match_evidence(brief, inf)))
             if fit == "weak":
                 st.warning(entry["rationale"])
