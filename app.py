@@ -7,8 +7,7 @@ Run with:
 import streamlit as st
 
 from src import config, vector_store
-from src.data_generator import NICHES, PLATFORMS, generate_influencers
-from src.embeddings import index_influencers
+from src.data_generator import NICHES, PLATFORMS
 from src.formatting import format_followers, match_evidence, niche_coverage
 from src.gemini_client import get_client
 from src.models import Brief
@@ -49,34 +48,6 @@ st.caption("RAG-powered creator matching: Postgres/pgvector retrieval + Gemini r
 indexed_count = get_indexed_count()
 
 with st.sidebar:
-    st.subheader("Database")
-    st.metric("Indexed creators", indexed_count)
-    build_count = st.number_input(
-        "Profiles to generate", min_value=10, max_value=config.MAX_INFLUENCER_COUNT, value=config.DEFAULT_INFLUENCER_COUNT, step=10
-    )
-    build_label = "Rebuild database" if indexed_count else "Build database"
-    if st.button(build_label, use_container_width=True):
-        client = get_gemini_client()
-        # Generate + embed fully before touching the database. If Gemini
-        # fails partway (bad key, network, quota), nothing here has written
-        # anything yet -- the existing indexed data is untouched.
-        with st.spinner("Generating synthetic profiles..."):
-            influencers = generate_influencers(count=build_count)
-        try:
-            with st.spinner(f"Embedding {len(influencers)} profiles with Gemini..."):
-                index_influencers(client, influencers)
-        except Exception as e:
-            st.error(f"Embedding failed, database was not modified: {e}")
-            st.stop()
-        with st.spinner("Storing in the database..."):
-            with vector_store.get_connection() as conn:
-                vector_store.init_schema(conn)
-                vector_store.replace_influencers(conn, influencers)
-        st.success(f"Indexed {len(influencers)} profiles.")
-        st.rerun()
-
-    st.divider()
-
     st.subheader("Brand brief")
     niche = st.selectbox("Niche", list(NICHES.keys()))
     platform = st.selectbox("Platform", ["Any", *PLATFORMS])
@@ -87,7 +58,7 @@ with st.sidebar:
     run = st.button("Run match", type="primary", use_container_width=True)
 
 if indexed_count == 0:
-    st.info("No creators indexed yet. Use **Build database** in the sidebar first.")
+    st.info("No creators indexed yet. Contact your administrator to add creators to the database.")
     st.stop()
 
 if not run:

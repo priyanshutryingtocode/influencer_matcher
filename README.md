@@ -13,24 +13,22 @@ when you're ready.
 influencer_matcher/
 ├── main.py                  # CLI entry point, wires the pipeline together
 ├── app.py                    # Streamlit interface (same pipeline, browser UI)
-├── docker-compose.yml         # optional: local Postgres+pgvector, if not using Supabase
-├── supabase/schema.sql        # paste-ready SQL if you want to set up tables manually
+├── evaluate.py               # golden-brief evaluation harness → evaluation-report.json
+├── evaluation-report.json    # last run's metrics output
 ├── requirements.txt
-├── .env.example
-├── pytest.ini
-├── src/
-│   ├── config.py              # model names, defaults, env loading
-│   ├── models.py               # Influencer and Brief data classes
-│   ├── data_generator.py       # synthetic influencer database
-│   ├── gemini_client.py        # Gemini API client factory (timeout + retries)
-│   ├── embeddings.py           # embedding computation (cosine similarity util)
-│   ├── vector_store.py         # Postgres/Supabase + pgvector: schema, replace, search
-│   ├── retrieval.py            # hybrid retrieval: embeds the brief, calls vector_store
-│   ├── ranking.py              # LLM ranking/reasoning step (structured JSON, validated)
-│   └── formatting.py           # stdout display helpers
-└── tests/
-    ├── test_pipeline.py        # offline tests, no external services required
-    └── test_vector_store.py    # integration tests, need a live database
+├── .env                      # (gitignored) GEMINI_API_KEY + DATABASE_URL
+├── data/
+│   └── evaluation_cases.json # versioned golden briefs for evaluate.py
+└── src/
+    ├── config.py              # model names, defaults, env loading
+    ├── models.py               # Influencer and Brief data classes
+    ├── data_generator.py       # synthetic influencer database
+    ├── gemini_client.py        # Gemini API client factory (timeout + retries)
+    ├── embeddings.py           # embedding computation
+    ├── vector_store.py         # Postgres/Supabase + pgvector: schema, replace, search
+    ├── retrieval.py            # embeds the brief, calls vector_store
+    ├── ranking.py              # LLM ranking/reasoning step (structured JSON, validated)
+    └── formatting.py           # stdout display helpers
 ```
 
 ## Setup
@@ -63,9 +61,8 @@ influencer_matcher/
 
    **Creating the tables:** running `python main.py` or `streamlit run app.py`
    creates everything automatically on first connect (`init_schema()`).
-   If you'd rather set it up yourself first, paste
-   [`supabase/schema.sql`](supabase/schema.sql) into the Supabase SQL Editor
-   — it's the identical schema, safe to re-run.
+   There's no separate schema file to run — `init_schema()` handles the
+   extension and tables, and is safe to re-run on every start.
 
 4. Create a virtual environment and install dependencies:
    ```
@@ -74,10 +71,12 @@ influencer_matcher/
    pip install -r requirements.txt
    ```
 
-5. Get a Gemini API key from https://aistudio.google.com/apikey, then:
+5. Get a Gemini API key from https://aistudio.google.com/apikey, then create a
+   `.env` file in this directory (there's no example file shipped — `.env` is
+   gitignored) with:
    ```
-   cp .env.example .env
-   # edit .env: paste your GEMINI_API_KEY and Supabase DATABASE_URL
+   GEMINI_API_KEY=your-key-here
+   DATABASE_URL=your-supabase-connection-string
    ```
 
 6. Run it:
@@ -120,9 +119,11 @@ Supabase gives you three connection options — this matters more than it looks:
 
 ### Local Postgres instead of Supabase
 
-`docker-compose.yml` still works if you'd rather run Postgres locally
-(`docker compose up -d`, then set `DATABASE_URL` to
-`postgresql://postgres:postgres@localhost:5432/influencer_matcher`). The
+This project works against any Postgres instance with the `pgvector` extension
+available. There's no bundled `docker-compose.yml`, so to run locally you'd
+install Postgres, enable pgvector (e.g. `CREATE EXTENSION IF NOT EXISTS vector`
+— `init_schema()` also runs this itself), and set `DATABASE_URL` to something
+like `postgresql://postgres:postgres@localhost:5432/influencer_matcher`. The
 schema and queries are identical either way — Supabase *is* Postgres, so
 nothing in `vector_store.py` changes based on which one you use.
 
@@ -139,20 +140,6 @@ budget field) plus a **Build/Rebuild database** button. Results render as
 cards with follower and engagement metrics, a 🟢🟡🔴 fit badge, and the
 Gemini-written rationale per pick. It reuses `src/` entirely — same
 retrieval, same ranking, same database connection logic as the CLI.
-
-## Running tests
-
-```
-pytest
-```
-
-`test_pipeline.py` covers the deterministic/offline parts (data generation,
-cosine similarity, and the full ranking-validation logic against a faked
-Gemini client) and needs nothing running. `test_vector_store.py` needs a
-live database at `DATABASE_URL` (Supabase or local) and skips itself
-automatically if it can't connect, so `pytest` is always safe to run even
-before the database is set up. Both suites run against an isolated
-`influencers_test_*` table, never the real `influencers` table.
 
 ## Evaluating retrieval and ranking
 
