@@ -13,7 +13,7 @@ from src import config, vector_store
 from src.data_generator import NICHES, PLATFORMS, generate_influencers
 from src.embeddings import index_influencers
 from src.formatting import print_brief, print_results
-from src.gemini_client import get_client
+from src.gemini_client import get_client, get_embedding_client
 from src.models import Brief
 from src.ranking import rank_candidates
 from src.retrieval import hybrid_retrieve
@@ -76,7 +76,7 @@ def ensure_indexed(client, conn, args) -> None:
     print("Generating synthetic influencer database...")
     influencers = generate_influencers(count=args.count)
 
-    print(f"Embedding {len(influencers)} profiles with Gemini...")
+    print(f"Embedding {len(influencers)} profiles...")
     index_influencers(client, influencers)
 
     print("Writing to the database (atomic replace)...")
@@ -85,11 +85,17 @@ def ensure_indexed(client, conn, args) -> None:
 
 def main() -> None:
     args = parse_args()
-    client = get_client()
+    
+    if config.EMBEDDING_BACKEND == "local":
+        print("Using local embedding backend (Sentence Transformer)...")
+        embedding_client = get_embedding_client()
+    else:
+        print("Using Gemini embedding backend...")
+        embedding_client = get_client()
 
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
-        ensure_indexed(client, conn, args)
+        ensure_indexed(embedding_client, conn, args)
 
         brief = Brief(
             niche=args.niche,
@@ -100,14 +106,14 @@ def main() -> None:
         print_brief(brief)
 
         print("\nRetrieving candidates (metadata filter + pgvector search)...")
-        candidates = hybrid_retrieve(client, conn, brief, top_k=args.top_k)
+        candidates = hybrid_retrieve(embedding_client, conn, brief, top_k=args.top_k)
         if not candidates:
             print("No creators found for that platform.")
             return
         print(f"  {len(candidates)} candidates returned")
 
         print("\nRanking with Gemini...")
-        ranked = rank_candidates(client, brief, candidates, top_n=args.top_n)
+        ranked = rank_candidates(get_client(), brief, candidates, top_n=args.top_n)
 
     candidates_by_id = {c.id: c for c in candidates}
     print_results(ranked, candidates_by_id, brief=brief)

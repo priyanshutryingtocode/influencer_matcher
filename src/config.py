@@ -19,7 +19,11 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 EMBED_MODEL = "gemini-embedding-001"
+EMBEDDING_BACKEND = "local"  # Options: "local" (Sentence Transformers) or "gemini"
 GEN_MODEL = "gemini-2.5-flash"
+
+# Local Sentence Transformer configuration
+LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 # Gemini Embedding defaults to 3072 dims; 768 is a good quality/cost tradeoff
 # for a project this size. Bump to 1536 or 3072 once you're on real data and

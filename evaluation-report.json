@@ -4,65 +4,65 @@
       "id": "sustainable-fashion",
       "expected_niche": "Sustainable Fashion",
       "retrieved_count": 10,
-      "retrieval_niche_precision_at_k": 0.4,
+      "retrieval_niche_precision_at_k": 0.9,
       "retrieval_niche_hit_at_k": true,
-      "ranked_niche_precision_at_n": 0.8,
+      "ranked_niche_precision_at_n": 1.0,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 1042.9,
-      "ranking_latency_ms": 17140.5
+      "retrieval_latency_ms": 7548.5,
+      "ranking_latency_ms": 14931.4
     },
     {
       "id": "fitness-tiktok",
       "expected_niche": "Fitness",
-      "retrieved_count": 4,
-      "retrieval_niche_precision_at_k": 0.0,
-      "retrieval_niche_hit_at_k": false,
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.1,
+      "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.0,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 834.1,
-      "ranking_latency_ms": 8927.0
+      "retrieval_latency_ms": 285.2,
+      "ranking_latency_ms": 18466.2
     },
     {
       "id": "tech-productivity",
       "expected_niche": "Technology",
       "retrieved_count": 10,
-      "retrieval_niche_precision_at_k": 0.1,
+      "retrieval_niche_precision_at_k": 0.6,
       "retrieval_niche_hit_at_k": true,
-      "ranked_niche_precision_at_n": 0.2,
+      "ranked_niche_precision_at_n": 1.0,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 824.6,
-      "ranking_latency_ms": 13516.7
+      "retrieval_latency_ms": 357.1,
+      "ranking_latency_ms": 14370.0
     },
     {
       "id": "food-instagram",
       "expected_niche": "Food",
-      "retrieved_count": 7,
-      "retrieval_niche_precision_at_k": 0.0,
-      "retrieval_niche_hit_at_k": false,
-      "ranked_niche_precision_at_n": 0.0,
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.2,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.4,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 818.2,
-      "ranking_latency_ms": 13852.6
+      "retrieval_latency_ms": 289.4,
+      "ranking_latency_ms": 9003.3
     },
     {
       "id": "travel-youtube",
       "expected_niche": "Travel",
-      "retrieved_count": 3,
+      "retrieved_count": 10,
       "retrieval_niche_precision_at_k": 0.0,
       "retrieval_niche_hit_at_k": false,
       "ranked_niche_precision_at_n": 0.0,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 943.7,
-      "ranking_latency_ms": 6129.3
+      "retrieval_latency_ms": 296.1,
+      "ranking_latency_ms": 13420.6
     }
   ],
   "summary": {
     "case_count": 5,
-    "mean_retrieval_niche_precision_at_k": 0.1,
-    "retrieval_niche_hit_rate_at_k": 0.4,
-    "mean_ranked_niche_precision_at_n": 0.2,
+    "mean_retrieval_niche_precision_at_k": 0.36,
+    "retrieval_niche_hit_rate_at_k": 0.8,
+    "mean_ranked_niche_precision_at_n": 0.48,
     "ranking_fallback_rate": 0,
-    "mean_retrieval_latency_ms": 892.7,
-    "mean_ranking_latency_ms": 11913.2
+    "mean_retrieval_latency_ms": 1755.3,
+    "mean_ranking_latency_ms": 14038.3
   }
 }

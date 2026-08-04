@@ -4,6 +4,7 @@ from google import genai
 from google.genai import types
 
 from . import config
+from .embeddings import get_sentence_transformer
 
 
 def get_client() -> genai.Client:
@@ -20,3 +21,11 @@ def get_client() -> genai.Client:
             retry_options=types.HttpRetryOptions(attempts=config.GEMINI_RETRY_ATTEMPTS),
         ),
     )
+
+
+def get_embedding_client():
+    """Get the appropriate embedding client based on configuration."""
+    if config.EMBEDDING_BACKEND == "local":
+        return get_sentence_transformer()
+    else:
+        return get_client()
