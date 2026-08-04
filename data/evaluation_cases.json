@@ -38,5 +38,85 @@
     "audience": "solo travelers planning affordable trips",
     "vibe": "honest, adventurous, budget-conscious",
     "expected_niche": "Travel"
+  },
+  {
+    "id": "beauty-instagram",
+    "niche": "Beauty",
+    "platform": "Instagram",
+    "audience": "young women interested in skincare and makeup",
+    "vibe": "authentic, educational, inclusive",
+    "expected_niche": "Beauty"
+  },
+  {
+    "id": "gaming-twitch",
+    "niche": "Gaming",
+    "platform": "Twitch",
+    "audience": "gamers aged 18-35 watching live streams",
+    "vibe": "high-energy, skilled, interactive",
+    "expected_niche": "Gaming"
+  },
+  {
+    "id": "programming-youtube",
+    "niche": "Programming",
+    "platform": "YouTube",
+    "audience": "developers and students learning to code",
+    "vibe": "clear, practical, deep-dive",
+    "expected_niche": "Programming"
+  },
+  {
+    "id": "coffee-tiktok",
+    "niche": "Coffee",
+    "platform": "TikTok",
+    "audience": "coffee enthusiasts and home baristas",
+    "vibe": "aesthetic, fast-paced, informative",
+    "expected_niche": "Coffee"
+  },
+  {
+    "id": "pets-instagram",
+    "niche": "Pets",
+    "platform": "Instagram",
+    "audience": "pet owners and animal lovers",
+    "vibe": "heartwarming, funny, relatable",
+    "expected_niche": "Pets"
+  },
+  {
+    "id": "finance-linkedin",
+    "niche": "Finance",
+    "platform": "LinkedIn",
+    "audience": "professionals interested in investing and wealth building",
+    "vibe": "professional, data-driven, actionable",
+    "expected_niche": "Finance"
+  },
+  {
+    "id": "travel-instagram",
+    "niche": "Travel",
+    "platform": "Instagram",
+    "audience": "wanderlust-driven millennials and Gen Z",
+    "vibe": "inspiring, authentic, budget-conscious",
+    "expected_niche": "Travel"
+  },
+  {
+    "id": "food-tiktok",
+    "niche": "Food",
+    "platform": "TikTok",
+    "audience": "home cooks looking for quick recipes",
+    "vibe": "fast, satisfying, easy-to-follow",
+    "expected_niche": "Food"
+  },
+  {
+    "id": "fitness-instagram",
+    "niche": "Fitness",
+    "platform": "Instagram",
+    "audience": "people building gym habits and home workouts",
+    "vibe": "motivating, form-focused, realistic",
+    "expected_niche": "Fitness"
+  },
+  {
+    "id": "tech-x",
+    "niche": "Technology",
+    "platform": "X",
+    "audience": "tech professionals and early adopters",
+    "vibe": "sharp, opinionated, real-time",
+    "expected_niche": "Technology"
   }
 ]

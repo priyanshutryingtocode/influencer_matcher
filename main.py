@@ -10,7 +10,7 @@ Usage:
 import argparse
 
 from src import config, vector_store
-from src.data_generator import NICHES, PLATFORMS, generate_influencers
+from src.data_generator import NICHES, PLATFORMS, generate_influencers, generate_balanced_influencers
 from src.embeddings import index_influencers
 from src.formatting import print_brief, print_results
 from src.gemini_client import get_client, get_embedding_client
@@ -46,6 +46,10 @@ def parse_args() -> argparse.Namespace:
         default=config.DEFAULT_INFLUENCER_COUNT, help="Size of the synthetic database",
     )
     parser.add_argument(
+        "--balanced", action="store_true", 
+        help="Generate balanced dataset with minimum floor per (niche, platform) pair"
+    )
+    parser.add_argument(
         "--top-k", type=positive_int(config.MAX_TOP_K),
         default=config.DEFAULT_TOP_K_RETRIEVAL, help="Candidates to retrieve before ranking",
     )
@@ -74,7 +78,10 @@ def ensure_indexed(client, conn, args) -> None:
         return
 
     print("Generating synthetic influencer database...")
-    influencers = generate_influencers(count=args.count)
+    if args.balanced:
+        influencers = generate_balanced_influencers(count=args.count)
+    else:
+        influencers = generate_influencers(count=args.count)
 
     print(f"Embedding {len(influencers)} profiles...")
     index_influencers(client, influencers)
