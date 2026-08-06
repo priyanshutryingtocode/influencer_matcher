@@ -10,6 +10,7 @@ these cases with human-labelled outcomes when real creator data is available.
 
 import argparse
 import json
+import time
 from pathlib import Path
 from statistics import mean
 from time import perf_counter
@@ -29,9 +30,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=Path("evaluation-report.json"), help="JSON metrics output")
     parser.add_argument("--top-k", type=int, default=config.DEFAULT_TOP_K_RETRIEVAL)
     parser.add_argument("--top-n", type=int, default=config.DEFAULT_TOP_N_RANKED)
+    parser.add_argument(
+        "--rate-limit-per-min", type=int, default=10,
+        help="Max ranking requests per minute to throttle to (free tier = 10). "
+             "Spreads cases out so the run doesn't trip the API burst quota.",
+    )
     args = parser.parse_args()
     if args.top_k <= 0 or args.top_n <= 0 or args.top_n > args.top_k:
         parser.error("top-k and top-n must be positive, and top-n cannot exceed top-k")
+    if args.rate_limit_per_min <= 0:
+        parser.error("--rate-limit-per-min must be positive")
     return args
 
 
@@ -52,7 +60,13 @@ def main() -> None:
         if not vector_store.count_influencers(conn):
             raise RuntimeError("No indexed creators. Run main.py --reindex before evaluating.")
 
-        for case in cases:
+        spacing = 60.0 / args.rate_limit_per_min
+        for i, case in enumerate(cases):
+            # Each case is one ranking call; space them out so the burst stays
+            # under the per-minute quota instead of tripping a 429 mid-run.
+            if i > 0 and spacing > 0:
+                time.sleep(spacing)
+
             brief = Brief(
                 niche=case["niche"], platform=case.get("platform", "Any"),
                 audience=case.get("audience", ""), vibe=case.get("vibe", ""),

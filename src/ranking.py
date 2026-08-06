@@ -30,6 +30,7 @@ from google import genai
 from google.genai import errors, types
 
 from . import config
+from .gemini_client import generate_content_throttled
 from .models import Brief, Influencer
 
 logger = logging.getLogger(__name__)
@@ -145,10 +146,11 @@ def rank_candidates(
     valid_ids = set(candidates_by_id.keys())
 
     try:
-        response = client.models.generate_content(
+        response = generate_content_throttled(
+            client,
             model=config.GEN_MODEL,
             contents=_build_prompt(brief, candidates, top_n),
-            config=types.GenerateContentConfig(
+            gen_config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=RANKING_SCHEMA,
             ),

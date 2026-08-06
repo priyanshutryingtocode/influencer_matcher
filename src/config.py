@@ -20,7 +20,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 EMBED_MODEL = "gemini-embedding-001"
 EMBEDDING_BACKEND = "local"  # Options: "local" (Sentence Transformers) or "gemini"
-GEN_MODEL = "gemini-2.5-flash"
+GEN_MODEL = "gemini-2.5-flash-lite"
 
 # Local Sentence Transformer configuration
 LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
@@ -40,6 +40,8 @@ MAX_INFLUENCER_COUNT = 1000
 MAX_TOP_K = 50
 
 # Gemini client resilience: fail fast instead of hanging, retry transient
-# errors instead of crashing the whole run over one flaky request.
-GEMINI_TIMEOUT_MS = 30_000
+# errors instead of crashing the whole run over one flaky request. The
+# timeout is generous because a single ranking request may legitimately wait
+# through a 429 rate-limit backoff (tens of seconds) before the model replies.
+GEMINI_TIMEOUT_MS = 120_000
 GEMINI_RETRY_ATTEMPTS = 3

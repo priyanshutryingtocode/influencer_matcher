@@ -8,8 +8,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 1.0,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 18309.1,
-      "ranking_latency_ms": 13517.9
+      "retrieval_latency_ms": 17319.8,
+      "ranking_latency_ms": 3010.4
     },
     {
       "id": "fitness-tiktok",
@@ -19,8 +19,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.6,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 331.7,
-      "ranking_latency_ms": 8081.7
+      "retrieval_latency_ms": 337.4,
+      "ranking_latency_ms": 2130.4
     },
     {
       "id": "tech-productivity",
@@ -30,8 +30,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 1.0,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 314.4,
-      "ranking_latency_ms": 19679.8
+      "retrieval_latency_ms": 339.7,
+      "ranking_latency_ms": 5141.5
     },
     {
       "id": "food-instagram",
@@ -41,8 +41,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.4,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 309.1,
-      "ranking_latency_ms": 13728.1
+      "retrieval_latency_ms": 347.6,
+      "ranking_latency_ms": 1668.9
     },
     {
       "id": "travel-youtube",
@@ -52,8 +52,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.8,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 305.3,
-      "ranking_latency_ms": 9202.5
+      "retrieval_latency_ms": 344.6,
+      "ranking_latency_ms": 6594.7
     },
     {
       "id": "beauty-instagram",
@@ -63,8 +63,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.6,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 304.8,
-      "ranking_latency_ms": 12217.9
+      "retrieval_latency_ms": 351.6,
+      "ranking_latency_ms": 1885.5
     },
     {
       "id": "gaming-twitch",
@@ -74,8 +74,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.6,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 297.3,
-      "ranking_latency_ms": 10505.8
+      "retrieval_latency_ms": 334.4,
+      "ranking_latency_ms": 1899.0
     },
     {
       "id": "programming-youtube",
@@ -85,8 +85,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 1.0,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 316.1,
-      "ranking_latency_ms": 8580.5
+      "retrieval_latency_ms": 338.4,
+      "ranking_latency_ms": 2002.5
     },
     {
       "id": "coffee-tiktok",
@@ -96,8 +96,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.6,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 315.4,
-      "ranking_latency_ms": 7904.0
+      "retrieval_latency_ms": 340.4,
+      "ranking_latency_ms": 3379.1
     },
     {
       "id": "pets-instagram",
@@ -107,8 +107,8 @@
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.6,
       "ranking_fallback": false,
-      "retrieval_latency_ms": 303.9,
-      "ranking_latency_ms": 17382.9
+      "retrieval_latency_ms": 402.2,
+      "ranking_latency_ms": 1817.7
     },
     {
       "id": "finance-linkedin",
@@ -117,9 +117,9 @@
       "retrieval_niche_precision_at_k": 0.3,
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.6,
-      "ranking_fallback": false,
-      "retrieval_latency_ms": 299.8,
-      "ranking_latency_ms": 10273.5
+      "ranking_fallback": true,
+      "retrieval_latency_ms": 333.1,
+      "ranking_latency_ms": 4615.7
     },
     {
       "id": "travel-instagram",
@@ -128,9 +128,9 @@
       "retrieval_niche_precision_at_k": 0.3,
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.6,
-      "ranking_fallback": false,
-      "retrieval_latency_ms": 320.8,
-      "ranking_latency_ms": 17864.2
+      "ranking_fallback": true,
+      "retrieval_latency_ms": 352.4,
+      "ranking_latency_ms": 4571.2
     },
     {
       "id": "food-tiktok",
@@ -139,9 +139,9 @@
       "retrieval_niche_precision_at_k": 0.4,
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.4,
-      "ranking_fallback": false,
-      "retrieval_latency_ms": 314.4,
-      "ranking_latency_ms": 11110.6
+      "ranking_fallback": true,
+      "retrieval_latency_ms": 338.8,
+      "ranking_latency_ms": 4931.1
     },
     {
       "id": "fitness-instagram",
@@ -150,9 +150,9 @@
       "retrieval_niche_precision_at_k": 0.4,
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.8,
-      "ranking_fallback": false,
-      "retrieval_latency_ms": 324.1,
-      "ranking_latency_ms": 9879.6
+      "ranking_fallback": true,
+      "retrieval_latency_ms": 378.0,
+      "ranking_latency_ms": 4798.5
     },
     {
       "id": "tech-x",
@@ -161,9 +161,9 @@
       "retrieval_niche_precision_at_k": 0.5,
       "retrieval_niche_hit_at_k": true,
       "ranked_niche_precision_at_n": 0.8,
-      "ranking_fallback": false,
-      "retrieval_latency_ms": 316.7,
-      "ranking_latency_ms": 12578.4
+      "ranking_fallback": true,
+      "retrieval_latency_ms": 341.3,
+      "ranking_latency_ms": 4697.1
     }
   ],
   "summary": {
@@ -171,8 +171,8 @@
     "mean_retrieval_niche_precision_at_k": 0.427,
     "retrieval_niche_hit_rate_at_k": 1,
     "mean_ranked_niche_precision_at_n": 0.693,
-    "ranking_fallback_rate": 0,
-    "mean_retrieval_latency_ms": 1512.2,
-    "mean_ranking_latency_ms": 12167.2
+    "ranking_fallback_rate": 0.333,
+    "mean_retrieval_latency_ms": 1480.0,
+    "mean_ranking_latency_ms": 3542.9
   }
 }
