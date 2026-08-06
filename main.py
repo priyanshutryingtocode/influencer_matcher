@@ -50,6 +50,12 @@ def parse_args() -> argparse.Namespace:
         help="Generate balanced dataset with minimum floor per (niche, platform) pair"
     )
     parser.add_argument(
+        "--balanced-floor", type=positive_int(),
+        default=3,
+        help="--balanced only: minimum profiles per (niche, platform) pair; "
+             "sets the dataset's minimum size (niches x platforms x floor)",
+    )
+    parser.add_argument(
         "--top-k", type=positive_int(config.MAX_TOP_K),
         default=config.DEFAULT_TOP_K_RETRIEVAL, help="Candidates to retrieve before ranking",
     )
@@ -79,7 +85,9 @@ def ensure_indexed(client, conn, args) -> None:
 
     print("Generating synthetic influencer database...")
     if args.balanced:
-        influencers = generate_balanced_influencers(count=args.count)
+        influencers = generate_balanced_influencers(
+            count=args.count, min_per_niche_platform=args.balanced_floor
+        )
     else:
         influencers = generate_influencers(count=args.count)
 

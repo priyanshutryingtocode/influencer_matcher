@@ -107,6 +107,17 @@ def count_influencers(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> i
     return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
+def _refresh_stats(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
+    """Refresh planner statistics after a bulk replace. Without this the
+    optimizer keeps stale estimates (often from an empty table) and falls
+    back to seq-scans / cold HNSW walks, which shows up as multi-second
+    latency on the first unfiltered (platform=Any) query."""
+    try:
+        conn.execute(f"ANALYZE {table}")
+    except Exception:
+        pass
+
+
 def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -173,6 +184,7 @@ def replace_influencers(
     with conn.transaction():
         conn.execute(f"TRUNCATE {table}")
         upsert_influencers(conn, influencers, table=table)
+    _refresh_stats(conn, table)
 
 
 def search(
@@ -185,7 +197,12 @@ def search(
     _validate_identifier(table)
 
     try:
-        conn.execute(f"SET hnsw.ef_search = {max(80, top_k * 8)}")
+        # Unfiltered (platform=Any) searches walk the whole HNSW graph, so
+        # they get a larger ef_search to avoid under-fetching neighbors;
+        # filtered searches need far fewer graph hops since they match a
+        # smaller platform subset.
+        ef_search = max(80, top_k * 8) if platform == "Any" else max(40, top_k * 4)
+        conn.execute(f"SET hnsw.ef_search = {ef_search}")
     except Exception:
         pass
     try:

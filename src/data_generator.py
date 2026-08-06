@@ -151,7 +151,12 @@ def generate_balanced_influencers(
     min_per_niche_platform: int = 3,
 ) -> list[Influencer]:
     """Generate influencers with balanced distribution across niche × platform.
-    
+
+    min_per_niche_platform is configurable so the per-(niche, platform)
+    coverage floor can be raised for denser retrieval pools (fewer top-k
+    slots wasted on adjacent-vibe niches). Note it drives the minimum viable
+    count: len(NICHES) * len(PLATFORMS) * min_per_niche_platform.
+
     Algorithm:
     1. First pass: allocate min_per_niche_platform to each (niche, platform) combo
     2. Second pass: fill remaining quota proportionally

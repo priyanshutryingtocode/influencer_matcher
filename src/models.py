@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+# Niches and their topic keywords, so query vectors and profile vectors share
+# vocabulary. Imported lazily inside Brief.query_text to avoid a circular
+# import at module load; the mapping is a plain dict, so this is cheap.
+_NICHES = None
+
 
 @dataclass
 class Influencer:
@@ -52,8 +57,21 @@ class Brief:
         """Text representation used as the retrieval query (the RAG 'query').
         Niche is included here (not enforced as a hard filter) since it's a
         semantic signal, not a strict eligibility criterion the way platform
-        is."""
+        is. The niche and its topic keywords are weighted heavily so the
+        query vector and a profile's niche-tagged vector land close together,
+        which is what drives retrieval precision."""
+        keywords = ""
+        if self.niche:
+            global _NICHES
+            if _NICHES is None:
+                from .data_generator import NICHES
+                _NICHES = NICHES
+            topics = _NICHES.get(self.niche)
+            if topics:
+                keywords = f" Topics include: {', '.join(topics)}."
         return (
-            f"Looking for a {self.niche} creator. Target audience: {self.audience}. "
-            f"Vibe / tone: {self.vibe}."
+            f"Niche: {self.niche}.{keywords} "
+            f"Looking for a {self.niche} creator with a target audience "
+            f"of {self.audience or 'general audiences'} and a "
+            f"{self.vibe or 'versatile'} vibe / tone."
         )

@@ -59,6 +59,10 @@ python main.py --count 500 --reindex --balanced
 # Max size (1000)
 python main.py --count 1000 --reindex --balanced
 
+# Denser coverage per (niche, platform): count must be >= niches x platforms x floor
+# (30 x 9 = 270 combos, so floor 3 is the max that fits the 1000-profile cap)
+python main.py --count 810 --reindex --balanced --balanced-floor 3
+
 # Custom brief
 python main.py --niche Fitness --platform TikTok \
     --audience "millennials, home gym" --vibe "high energy"
