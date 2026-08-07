@@ -16,7 +16,8 @@ from statistics import mean
 from time import perf_counter
 
 from src import config, vector_store
-from src.gemini_client import get_client
+from src.embeddings import embed_texts
+from src.gemini_client import get_client, get_embedding_client
 from src.models import Brief
 from src.ranking import rank_candidates
 from src.retrieval import hybrid_retrieve
@@ -47,6 +48,17 @@ def niche_precision(items, expected_niche: str) -> float:
     return sum(item.niche == expected_niche for item in items) / len(items) if items else 0.0
 
 
+def _warmup(conn, embedding_client) -> None:
+    """Absorb cold-start costs (embedding-model load + first HNSW query) so
+    case #1 isn't timed against them. Without this, the very first retrieval
+    pays a multi-second model load plus a cold full-table scan over the Any
+    platform, inflating one case's retrieval_latency by ~45s."""
+    query_vec = embed_texts(
+        embedding_client, ["warmup"], task_type="RETRIEVAL_QUERY"
+    )[0]
+    vector_store.search(conn, query_embedding=query_vec, platform="Any", top_k=1)
+
+
 def main() -> None:
     args = parse_args()
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
@@ -54,11 +66,13 @@ def main() -> None:
         raise RuntimeError("Evaluation dataset is empty")
 
     client = get_client()
+    embedding_client = get_embedding_client()
     case_results = []
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
         if not vector_store.count_influencers(conn):
             raise RuntimeError("No indexed creators. Run main.py --reindex before evaluating.")
+        _warmup(conn, embedding_client)
 
         spacing = 60.0 / args.rate_limit_per_min
         for i, case in enumerate(cases):
