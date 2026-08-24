@@ -15,7 +15,15 @@ A RAG pipeline that matches brand briefs to influencer profiles using Postgres +
 ```
 influencer_matcher/
 ├── main.py                   # CLI entry point
-├── app.py                    # Streamlit interface
+├── app.py                    # Streamlit navigation shell
+├── views/                    # Streamlit pages + UI support modules
+│   ├── shared.py             #   cached clients, DB access, run_pipeline()
+│   ├── search.py             #   Search page (brief → shortlist → CSV)
+│   ├── history.py            #   History page (.runs/ browser)
+│   ├── compare.py            #   Compare page (side-by-side runs)
+│   ├── cards.py              #   reusable result-card renderer
+│   ├── compare_logic.py      #   pure diff/summary math
+│   └── run_store.py          #   local JSON persistence + CSV export
 ├── evaluate.py               # golden-brief evaluation → evaluation-report.json
 ├── requirements.txt
 ├── .env                      # GEMINI_API_KEY + DATABASE_URL (gitignored)
@@ -76,7 +84,14 @@ python evaluate.py
 ```bash
 streamlit run app.py
 ```
-Sidebar form for brand brief (niche, platform, audience, vibe). **No database build button** — data must be pre-indexed via CLI. Results show fit badge, metrics, and Gemini rationale.
+
+A three-page interface (requires streamlit >= 1.40):
+
+- **Search** — brief form in the main area (niche, platform, audience, vibe) with staged progress, result cards showing fit badge, tier, metrics, rationale, and expandable match evidence; every successful run is saved locally and can be exported as CSV
+- **History** — browse/reopen/delete past shortlists (stored as JSON files under `.runs/`, gitignored)
+- **Compare** — side-by-side shortlists from any two runs, with shared creators highlighted and summary deltas
+
+**No database build button** — data must be pre-indexed via CLI. History/Compare work offline from local files; Search needs the database.
 
 ## Embedding Backend
 
