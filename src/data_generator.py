@@ -198,6 +198,7 @@ def generate_balanced_influencers(
                     used_handles=used_handles,
                     primary_niche=niche,
                     platform=platform,
+                    seed=seed,
                 )
                 creators.append(inf)
                 niche_counts[niche] += 1
@@ -216,6 +217,7 @@ def generate_balanced_influencers(
                 used_handles=used_handles,
                 primary_niche=niche,
                 platform=platform,
+                seed=seed,
             )
             creators.append(inf)
             niche_counts[niche] += 1
@@ -258,12 +260,13 @@ def generate_balanced_influencers(
                 used_handles=used_handles,
                 primary_niche=niche,
                 platform=platform,
+                seed=seed,
             )
             creators.append(inf)
             niche_counts[niche] += 1
             combo_counts[(niche, platform)] += 1
             creator_id += 1
-    
+
     # Shuffle to avoid ordering bias
     rng.shuffle(creators)
     
@@ -282,6 +285,7 @@ def _create_single_influencer(
     used_handles: set[str],
     primary_niche: str,
     platform: str,
+    seed: int = 42,
 ) -> Influencer:
     """Create a single influencer with specified niche and platform."""
     secondary = rng.sample([n for n in niches if n != primary_niche], k=rng.choices([0, 1, 2], [55, 35, 10])[0])
@@ -294,7 +298,7 @@ def _create_single_influencer(
     city = rng.choice(cities)
     country = CITY_COUNTRY[city]
     profile_fake = Faker(LOCALE_BY_COUNTRY.get(country, "en_US"))
-    profile_fake.seed_instance(42 * 10_000 + creator_id)
+    profile_fake.seed_instance(seed * 10_000 + creator_id)
     handle = _unique_handle(profile_fake, rng, used_handles)
     name = profile_fake.name()
     brand_pool = [brand for niche in [primary_niche, *secondary] for brand in BRANDS.get(niche, [])]

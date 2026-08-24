@@ -8,15 +8,16 @@ the model followed instructions, returned real ids, filled every slot, or
 was honest about fit quality:
 
 - raw_ranked might not even be a list (e.g. {"ranked": "invalid"}), and
-  individual entries might not be dicts -- both are checked before any
-  attribute access.
+  individual entries might not be dicts, or their "id" not an integer --
+  all three are checked before any set membership or attribute access.
 - ids that don't exist in the candidate pool, or repeat ids, are dropped.
 - if the model returns fewer valid entries than top_n, the remaining slots
   are filled from retrieval order rather than returning a short list.
-- "fit": "strong" is not trusted outright -- a candidate whose niche
-  doesn't match the brief's requested niche is deterministically capped at
-  "partial", regardless of what the model claims. The model is asked to be
-  honest, but this doesn't rely on it being honest.
+- "fit": "strong" is not trusted outright -- a candidate whose primary or
+  secondary niches don't include the brief's requested niche is
+  deterministically capped at "partial", regardless of what the model
+  claims. The model is asked to be honest, but this doesn't rely on it
+  being honest.
 - API/parsing failures are caught narrowly (not bare Exception), logged,
   and produce entries tagged with a "source" field so callers can surface
   a real warning instead of silently showing a degraded result as if it
@@ -169,6 +170,11 @@ def rank_candidates(
         if not isinstance(entry, dict):
             continue  # model returned something other than an object -- skip, don't crash
         entry_id = entry.get("id")
+        # Enforce the schema's declared type: a non-int id (string, list, dict
+        # -- all things a loose model can emit) is dropped here rather than
+        # crashing on unhashable set membership below.
+        if not isinstance(entry_id, int) or isinstance(entry_id, bool):
+            continue
         if entry_id not in valid_ids or entry_id in seen:
             continue  # unknown id (hallucinated) or duplicate -- drop it
 
@@ -176,11 +182,13 @@ def rank_candidates(
         if fit not in VALID_FIT_LEVELS:
             fit = "partial"  # model didn't follow the enum; don't assume "strong"
 
-        # Deterministic check, not trust: a candidate whose niche doesn't
-        # match the brief can't be graded "strong" no matter what the model
-        # says. This doesn't depend on the model being honest.
+        # Deterministic check, not trust: a candidate whose primary AND
+        # secondary niches all miss the brief can't be graded "strong" no
+        # matter what the model says. This doesn't depend on the model being
+        # honest. (A secondary-niche match still counts -- e.g. a Fashion
+        # creator tagged Sustainable Fashion may genuinely be a strong pick.)
         candidate = candidates_by_id[entry_id]
-        if fit == "strong" and candidate.niche != brief.niche:
+        if fit == "strong" and brief.niche not in {candidate.niche, *candidate.secondary_niches}:
             fit = "partial"
 
         seen.add(entry_id)

@@ -80,12 +80,14 @@ Sidebar form for brand brief (niche, platform, audience, vibe). **No database bu
 
 ## Embedding Backend
 
-Configured in `src/config.py`:
+Embeddings are computed locally with Sentence Transformers — no API cost, no
+network calls. Configured in `src/config.py`:
 ```python
-EMBEDDING_BACKEND = "local"  # or "gemini"
 LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
+EMBED_DIMENSIONS = 768
 ```
-Local backend is default (no API key needed for embeddings).
+The model name is stored per-row in the database (`embed_model` column) so
+vector provenance stays traceable. Changing the model requires a `--reindex`.
 
 ## Evaluation
 

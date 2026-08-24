@@ -5,8 +5,6 @@ this module's job is just to embed the brief's query text and hand it off.
 """
 
 import psycopg
-from typing import Union
-from google import genai
 
 from . import vector_store
 from .embeddings import embed_texts
@@ -14,13 +12,12 @@ from .models import Brief, Influencer
 
 
 def hybrid_retrieve(
-    client: Union[genai.Client, object],
     conn: psycopg.Connection,
     brief: Brief,
     top_k: int = 10,
     table: str = vector_store.DEFAULT_TABLE,
 ) -> list[Influencer]:
-    query_vec = embed_texts(client, [brief.query_text()], task_type="RETRIEVAL_QUERY")[0]
+    query_vec = embed_texts([brief.query_text()])[0]
     return vector_store.search(
         conn,
         query_embedding=query_vec,

@@ -130,7 +130,7 @@ def upsert_influencers(
         (
             inf.id, inf.handle, inf.niche, inf.platform, inf.city,
             inf.followers, inf.engagement, inf.tags, inf.bio,
-            inf.embedding, config.EMBED_MODEL, _content_hash(inf.corpus_text()),
+            inf.embedding, config.LOCAL_EMBED_MODEL, _content_hash(inf.corpus_text()),
             inf.name, inf.secondary_niches, inf.country, inf.language,
             inf.average_views, inf.average_likes, inf.average_comments,
             inf.verified, inf.posts_per_week, inf.account_age_years,

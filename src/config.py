@@ -18,16 +18,14 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 #   postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-EMBED_MODEL = "gemini-embedding-001"
-EMBEDDING_BACKEND = "local"  # Options: "local" (Sentence Transformers) or "gemini"
 GEN_MODEL = "gemini-2.5-flash-lite"
 
-# Local Sentence Transformer configuration
+# Embeddings are computed locally with Sentence Transformers (no API cost);
+# this name is recorded per-row in the database's embed_model column so the
+# provenance of stored vectors is always traceable.
 LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
-
-# Gemini Embedding defaults to 3072 dims; 768 is a good quality/cost tradeoff
-# for a project this size. Bump to 1536 or 3072 once you're on real data and
-# want maximum retrieval quality.
+# all-mpnet-base-v2 outputs 768-dim vectors. This must match the VECTOR(...)
+# column width in vector_store.py -- changing the model means reindexing.
 EMBED_DIMENSIONS = 768
 
 DEFAULT_INFLUENCER_COUNT = 60

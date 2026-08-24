@@ -1,0 +1,178 @@
+{
+  "cases": [
+    {
+      "id": "sustainable-fashion",
+      "expected_niche": "Sustainable Fashion",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 1.0,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 1.0,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 656.6,
+      "ranking_latency_ms": 2056.4
+    },
+    {
+      "id": "fitness-tiktok",
+      "expected_niche": "Fitness",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.3,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.6,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 311.4,
+      "ranking_latency_ms": 1850.8
+    },
+    {
+      "id": "tech-productivity",
+      "expected_niche": "Technology",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.9,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 1.0,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 306.8,
+      "ranking_latency_ms": 1736.8
+    },
+    {
+      "id": "food-instagram",
+      "expected_niche": "Food",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.2,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.4,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 301.9,
+      "ranking_latency_ms": 1553.9
+    },
+    {
+      "id": "travel-youtube",
+      "expected_niche": "Travel",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.4,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.8,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 302.3,
+      "ranking_latency_ms": 1859.4
+    },
+    {
+      "id": "beauty-instagram",
+      "expected_niche": "Beauty",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.3,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.6,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 305.6,
+      "ranking_latency_ms": 2044.6
+    },
+    {
+      "id": "gaming-twitch",
+      "expected_niche": "Gaming",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.3,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.6,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 321.9,
+      "ranking_latency_ms": 2029.9
+    },
+    {
+      "id": "programming-youtube",
+      "expected_niche": "Programming",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.5,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 1.0,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 302.8,
+      "ranking_latency_ms": 1739.9
+    },
+    {
+      "id": "coffee-tiktok",
+      "expected_niche": "Coffee",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.3,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.6,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 307.1,
+      "ranking_latency_ms": 1651.3
+    },
+    {
+      "id": "pets-instagram",
+      "expected_niche": "Pets",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.3,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.6,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 333.1,
+      "ranking_latency_ms": 1632.7
+    },
+    {
+      "id": "finance-linkedin",
+      "expected_niche": "Finance",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.3,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.6,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 300.4,
+      "ranking_latency_ms": 1722.1
+    },
+    {
+      "id": "travel-instagram",
+      "expected_niche": "Travel",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.3,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.6,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 306.2,
+      "ranking_latency_ms": 1769.6
+    },
+    {
+      "id": "food-tiktok",
+      "expected_niche": "Food",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.4,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.8,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 313.1,
+      "ranking_latency_ms": 1745.2
+    },
+    {
+      "id": "fitness-instagram",
+      "expected_niche": "Fitness",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.4,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 0.8,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 299.8,
+      "ranking_latency_ms": 1674.2
+    },
+    {
+      "id": "tech-x",
+      "expected_niche": "Technology",
+      "retrieved_count": 10,
+      "retrieval_niche_precision_at_k": 0.5,
+      "retrieval_niche_hit_at_k": true,
+      "ranked_niche_precision_at_n": 1.0,
+      "ranking_fallback": false,
+      "retrieval_latency_ms": 303.9,
+      "ranking_latency_ms": 1759.4
+    }
+  ],
+  "summary": {
+    "case_count": 15,
+    "mean_retrieval_niche_precision_at_k": 0.427,
+    "retrieval_niche_hit_rate_at_k": 1,
+    "mean_ranked_niche_precision_at_n": 0.733,
+    "ranking_fallback_rate": 0,
+    "mean_retrieval_latency_ms": 331.5,
+    "mean_ranking_latency_ms": 1788.4
+  }
+}

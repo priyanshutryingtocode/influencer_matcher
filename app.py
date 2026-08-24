@@ -6,10 +6,10 @@ Run with:
 
 import streamlit as st
 
-from src import config, vector_store
+from src import vector_store
 from src.data_generator import NICHES, PLATFORMS
 from src.formatting import format_followers, match_evidence, niche_coverage
-from src.gemini_client import get_client, get_embedding_client
+from src.gemini_client import get_client
 from src.models import Brief
 from src.ranking import rank_candidates
 from src.retrieval import hybrid_retrieve
@@ -65,17 +65,12 @@ if not run:
     st.info("Set a brief in the sidebar and click **Run match**.")
     st.stop()
 
-if config.EMBEDDING_BACKEND == "local":
-    st.sidebar.info("Using local embedding backend (Sentence Transformer)...")
-else:
-    st.sidebar.info("Using Gemini embedding backend...")
-
 client = get_gemini_client()
 brief = Brief(niche=niche, platform=platform, audience=audience, vibe=vibe)
 
 with st.spinner("Retrieving candidates (Postgres + pgvector)..."):
     with vector_store.get_connection() as conn:
-        candidates = hybrid_retrieve(get_embedding_client(), conn, brief, top_k=top_k)
+        candidates = hybrid_retrieve(conn, brief, top_k=top_k)
 
 if not candidates:
     st.warning("No creators found for that platform. Try 'Any' platform, or check the database is indexed.")

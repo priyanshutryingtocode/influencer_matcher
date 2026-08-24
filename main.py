@@ -13,7 +13,7 @@ from src import config, vector_store
 from src.data_generator import NICHES, PLATFORMS, generate_influencers, generate_balanced_influencers
 from src.embeddings import index_influencers
 from src.formatting import print_brief, print_results
-from src.gemini_client import get_client, get_embedding_client
+from src.gemini_client import get_client
 from src.models import Brief
 from src.ranking import rank_candidates
 from src.retrieval import hybrid_retrieve
@@ -72,10 +72,10 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def ensure_indexed(client, conn, args) -> None:
+def ensure_indexed(conn, args) -> None:
     """Only regenerate + re-embed if the table is empty or --reindex was
     passed. Generation and embedding happen entirely before any database
-    write -- if Gemini fails partway (bad key, network, quota), nothing
+    write -- if anything fails partway (bad key, network, quota), nothing
     here has touched the database yet, so existing indexed data survives.
     The clear-and-write itself is atomic (see vector_store.replace_influencers)."""
     existing = vector_store.count_influencers(conn)
@@ -92,7 +92,7 @@ def ensure_indexed(client, conn, args) -> None:
         influencers = generate_influencers(count=args.count)
 
     print(f"Embedding {len(influencers)} profiles...")
-    index_influencers(client, influencers)
+    index_influencers(influencers)
 
     print("Writing to the database (atomic replace)...")
     vector_store.replace_influencers(conn, influencers)
@@ -100,17 +100,10 @@ def ensure_indexed(client, conn, args) -> None:
 
 def main() -> None:
     args = parse_args()
-    
-    if config.EMBEDDING_BACKEND == "local":
-        print("Using local embedding backend (Sentence Transformer)...")
-        embedding_client = get_embedding_client()
-    else:
-        print("Using Gemini embedding backend...")
-        embedding_client = get_client()
 
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
-        ensure_indexed(embedding_client, conn, args)
+        ensure_indexed(conn, args)
 
         brief = Brief(
             niche=args.niche,
@@ -121,7 +114,7 @@ def main() -> None:
         print_brief(brief)
 
         print("\nRetrieving candidates (metadata filter + pgvector search)...")
-        candidates = hybrid_retrieve(embedding_client, conn, brief, top_k=args.top_k)
+        candidates = hybrid_retrieve(conn, brief, top_k=args.top_k)
         if not candidates:
             print("No creators found for that platform.")
             return

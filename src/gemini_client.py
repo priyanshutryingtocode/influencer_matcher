@@ -1,4 +1,4 @@
-"""Gemini API client factory."""
+"""Gemini API client factory (used for ranking; embeddings are local)."""
 
 import logging
 import re
@@ -8,7 +8,6 @@ from google import genai
 from google.genai import errors, types
 
 from . import config
-from .embeddings import get_sentence_transformer
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +31,6 @@ def get_client() -> genai.Client:
             retry_options=types.HttpRetryOptions(attempts=config.GEMINI_RETRY_ATTEMPTS),
         ),
     )
-
-
-def get_embedding_client():
-    """Get the appropriate embedding client based on configuration."""
-    if config.EMBEDDING_BACKEND == "local":
-        return get_sentence_transformer()
-    else:
-        return get_client()
 
 
 def _throttle_sleep_seconds(error: Exception) -> float:
