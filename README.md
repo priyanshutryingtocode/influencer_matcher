@@ -91,7 +91,7 @@ A three-page interface (requires streamlit >= 1.40):
 - **History** — browse/reopen/delete past shortlists (stored as JSON files under `.runs/`, gitignored)
 - **Compare** — side-by-side shortlists from any two runs, with shared creators highlighted and summary deltas
 
-**No database build button** — data must be pre-indexed via CLI. History/Compare work offline from local files; Search needs the database.
+**No database build button** — data must be pre-indexed via CLI. History/Compare work offline from local files; Search needs the database. Dark UI by default, configured in `.streamlit/config.toml`.
 
 ## Embedding Backend
 
