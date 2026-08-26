@@ -4,3 +4,10 @@ primaryColor = "#818CF8"
 backgroundColor = "#0F1117"
 secondaryBackgroundColor = "#181D2A"
 textColor = "#E5E9F0"
+
+[server]
+# The module watcher probes every importable package (including
+# transformers' lazily-loaded vision models, which need torchvision we
+# deliberately don't ship) and spams the deployment log with harmless
+# tracebacks. Watching is only a dev convenience; disable it.
+fileWatcherType = "none"
