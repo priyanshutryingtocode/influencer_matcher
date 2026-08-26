@@ -104,6 +104,29 @@ EMBED_DIMENSIONS = 768
 The model name is stored per-row in the database (`embed_model` column) so
 vector provenance stays traceable. Changing the model requires a `--reindex`.
 
+### Embedding model A/B
+
+`src/config.py` exposes three knobs for comparing embedding families:
+
+```python
+LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"  # baseline
+EMBED_QUERY_PREFIX = ""    # e.g. "query: " (e5) or a search directive (bge)
+EMBED_PASSAGE_PREFIX = ""  # e.g. "passage: " (e5)
+EMBED_DIMENSIONS = 768     # must match the model output; checked at load
+```
+
+Procedure per candidate model:
+
+1. Set `LOCAL_EMBED_MODEL` + prefixes in `src/config.py`
+2. `python main.py --count 810 --reindex --balanced --balanced-floor 3`
+3. `python evaluate.py --output report-<model>.json`
+4. Compare `mean_ranked_niche_precision_at_n`, hit-rate, and latencies across reports; keep the winner and re-run step 2 with it
+
+Candidates worth trying (all 768-dim, so no schema change): `intfloat/e5-base-v2`
+(prefixes `"query: "` / `"passage: "`), `BAAI/bge-base-en-v1.5` (both prefixes set to
+`"Represent this sentence for searching relevant passages: "`). Each downloads
+~0.5GB on first use.
+
 ## Evaluation
 
 ```bash

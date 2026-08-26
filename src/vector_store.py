@@ -1,15 +1,59 @@
 """Postgres + pgvector: the persistent home for influencer embeddings."""
 
 import hashlib
+import threading
 
 import numpy as np
 import psycopg
 from pgvector.psycopg import register_vector
+from psycopg_pool import ConnectionPool
 
 from . import config
 from .models import Influencer
 
 DEFAULT_TABLE = "influencers"
+
+# A persistent pool avoids the per-query TCP+TLS+auth handshake to Supabase,
+# which costs more than the vector search itself. Session pooler (the README's
+# documented setup) is designed for long-lived connections. Pool creation is
+# lazy and guarded so importing this module never opens network connections.
+_pool: ConnectionPool | None = None
+_pool_lock = threading.Lock()
+
+_schema_ready_tables: set[str] = set()
+
+
+def _configure_connection(conn: psycopg.Connection) -> None:
+    """Runs once per new pooled connection: register pgvector adapters and
+    pin the HNSW scan mode. Doing these here (instead of in search()) means
+    each query saves two extra roundtrips."""
+    register_vector(conn)
+    try:
+        conn.execute("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', false)")
+    except Exception:
+        pass  # non-pgvector database; searches will still work unoptimized
+
+
+def _get_pool() -> ConnectionPool:
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                if not config.DATABASE_URL:
+                    raise RuntimeError(
+                        "DATABASE_URL is not set. Copy to .env and paste in "
+                        "your Supabase connection string (click Connect on your "
+                        "project's dashboard, then the Session pooler tab)."
+                    )
+                _pool = ConnectionPool(
+                    conninfo=config.DATABASE_URL,
+                    min_size=1,
+                    max_size=4,
+                    kwargs={"autocommit": True, "prepare_threshold": None},
+                    configure=_configure_connection,
+                    open=True,
+                )
+    return _pool
 
 
 def _schema_sql(table: str) -> str:
@@ -76,25 +120,33 @@ def _validate_identifier(name: str) -> None:
         raise ValueError(f"Not a safe SQL identifier: {name!r}")
 
 
-def get_connection() -> psycopg.Connection:
-    if not config.DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL is not set. Copy to .env and paste in "
-            "your Supabase connection string (click Connect on your project's "
-            "dashboard, then the Session pooler tab)."
-        )
-    conn = psycopg.connect(config.DATABASE_URL, autocommit=True, prepare_threshold=None)
-    register_vector(conn)
-    return conn
+def get_connection(timeout: float = 10):
+    """Check a connection out of the pool as a context manager:
+
+        with vector_store.get_connection() as conn:
+            ...
+
+    On exit the connection returns to the pool instead of being torn down,
+    so repeat queries skip connection setup entirely. `timeout` bounds how
+    long a caller waits for a healthy connection before PoolTimeout -- short
+    enough that an unreachable database surfaces an error banner quickly,
+    long enough to absorb transient Supabase pooler handoffs."""
+    return _get_pool().connection(timeout=timeout)
 
 
 def init_schema(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
+    """Create tables/indexes if missing. Idempotent DDL; skipped after the
+    first successful run per table per process (cheap, but why pay it)."""
+    if table in _schema_ready_tables:
+        return
     conn.execute(_schema_sql(table))
+    _schema_ready_tables.add(table)
 
 
 def drop_table(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
     _validate_identifier(table)
     conn.execute(f"DROP TABLE IF EXISTS {table}")
+    _schema_ready_tables.discard(table)  # force schema re-init if reused
 
 
 def clear_table(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
@@ -196,17 +248,17 @@ def search(
 ) -> list[Influencer]:
     _validate_identifier(table)
 
+    # ef_search varies per query (see below); iterative_scan was pinned at
+    # connection configure time. One set_config roundtrip instead of two SETs.
     try:
         # Unfiltered (platform=Any) searches walk the whole HNSW graph, so
         # they get a larger ef_search to avoid under-fetching neighbors;
         # filtered searches need far fewer graph hops since they match a
         # smaller platform subset.
         ef_search = max(80, top_k * 8) if platform == "Any" else max(40, top_k * 4)
-        conn.execute(f"SET hnsw.ef_search = {ef_search}")
-    except Exception:
-        pass
-    try:
-        conn.execute("SET hnsw.iterative_scan = relaxed_order")
+        conn.execute(
+            "SELECT set_config('hnsw.ef_search', %s, false)", (str(ef_search),)
+        )
     except Exception:
         pass
 

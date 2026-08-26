@@ -28,6 +28,12 @@ LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 # column width in vector_store.py -- changing the model means reindexing.
 EMBED_DIMENSIONS = 768
 
+# Some embedding families expect instruction prefixes (e5 wants "query: "/
+# "passage: ", bge wants a search directive; mpnet wants nothing). These are
+# prepended in embeddings.py before encoding. See README "Embedding model A/B".
+EMBED_QUERY_PREFIX = ""
+EMBED_PASSAGE_PREFIX = ""
+
 DEFAULT_INFLUENCER_COUNT = 60
 DEFAULT_TOP_K_RETRIEVAL = 10
 DEFAULT_TOP_N_RANKED = 5

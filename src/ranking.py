@@ -74,13 +74,13 @@ def _build_prompt(brief: Brief, candidates: list[Influencer], top_n: int) -> str
         {
             "id": c.id,
             "niche": c.niche,
-            "secondary_niches": c.secondary_niches,
+            "secondary_niches": c.secondary_niches[:4],
             "platform": c.platform,
-            "tags": c.tags,
+            "tags": c.tags[:6],
             "content_style": c.content_style,
             "followers": c.followers,
             "engagement_rate": c.engagement,
-            "bio": c.bio,
+            "bio": c.bio[:240],
         }
         for c in candidates
     ]
@@ -137,6 +137,26 @@ def _fallback_ranking(candidates: list[Influencer], top_n: int, reason: str) -> 
     ]
 
 
+def _gen_config() -> types.GenerateContentConfig:
+    """Response schema + latency/reproducibility tuning.
+
+    - temperature=0 pins ranking so identical briefs produce identical
+      shortlists -- without it, run-to-run drift swamps small quality changes
+      and makes A/B comparisons (embedding models, prompt edits) meaningless.
+    - thinking_budget=0 keeps Gemini 2.5 models from spending time on hidden
+      'thinking' tokens; guarded with hasattr so older google-genai SDKs
+      (no ThinkingConfig) still work."""
+    kwargs = {
+        "response_mime_type": "application/json",
+        "response_schema": RANKING_SCHEMA,
+        "temperature": 0.0,
+    }
+    thinking = getattr(types, "ThinkingConfig", None)
+    if thinking is not None:
+        kwargs["thinking_config"] = thinking(thinking_budget=0)
+    return types.GenerateContentConfig(**kwargs)
+
+
 def rank_candidates(
     client: genai.Client,
     brief: Brief,
@@ -151,10 +171,7 @@ def rank_candidates(
             client,
             model=config.GEN_MODEL,
             contents=_build_prompt(brief, candidates, top_n),
-            gen_config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=RANKING_SCHEMA,
-            ),
+            gen_config=_gen_config(),
         )
         parsed = json.loads(response.text)
         raw_ranked = parsed["ranked"]

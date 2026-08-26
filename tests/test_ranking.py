@@ -59,6 +59,15 @@ def test_valid_response_cleaned(monkeypatch):
     assert ranked[1]["fit"] == "weak"
 
 
+def test_gen_config_pins_temperature_and_schema():
+    cfg = ranking._gen_config()
+    assert cfg.temperature == 0.0
+    assert cfg.response_mime_type == "application/json"
+    assert cfg.response_schema == ranking.RANKING_SCHEMA
+    if getattr(cfg, "thinking_config", None) is not None:
+        assert cfg.thinking_config.thinking_budget == 0
+
+
 # ----------------------------------------------------------------- fallbacks
 
 def test_unparseable_json_falls_back(monkeypatch):
