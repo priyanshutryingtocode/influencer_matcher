@@ -13,6 +13,13 @@ from src import ranking
 from src.models import Brief, Influencer
 
 
+@pytest.fixture(autouse=True)
+def _clear_ranking_cache():
+    ranking._clear_rank_cache()
+    yield
+    ranking._clear_rank_cache()
+
+
 class _FakeResponse:
     def __init__(self, payload):
         object.__setattr__(self, "_payload", json.dumps(payload))
@@ -187,3 +194,22 @@ def test_short_list_filled_from_retrieval_order(monkeypatch):
     assert [e["id"] for e in ranked] == [3, 1, 2]
     assert ranked[0]["source"] == "llm"
     assert {e["source"] for e in ranked[1:]} == {"filled"}
+
+
+def test_ranking_cache_hit_avoids_second_llm_call(monkeypatch):
+    calls = []
+
+    def counting_stub(client, model, contents, gen_config=None):
+        calls.append(1)
+        return _FakeResponse({"ranked": [{"id": 1, "fit": "strong", "rationale": "cached"}]})
+
+    monkeypatch.setattr(ranking, "generate_content_throttled", counting_stub)
+    candidates = [make_influencer(1, "Fitness")]
+    first = ranking.rank_candidates(object(), BRIEF, candidates, top_n=1)
+    second = ranking.rank_candidates(object(), BRIEF, candidates, top_n=1)
+    assert len(calls) == 1
+    assert first == second
+
+    # Different top_n must miss
+    ranking.rank_candidates(object(), BRIEF, candidates, top_n=2)
+    assert len(calls) == 2

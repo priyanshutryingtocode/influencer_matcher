@@ -39,6 +39,7 @@ def get_sentence_transformer() -> "SentenceTransformer":
 def _check_dimensions(model) -> None:
     """Fail loudly if the configured model's output width doesn't match the
     VECTOR(...) column -- pgvector would reject every insert otherwise."""
+    # Probe without prefix is fine; dimension is same with/without.
     probe = np.asarray(model.encode(["dim"], show_progress_bar=False))
     if probe.shape[-1] != config.EMBED_DIMENSIONS:
         raise RuntimeError(

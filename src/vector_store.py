@@ -110,6 +110,15 @@ ALTER TABLE {table} ADD COLUMN IF NOT EXISTS brand_collaborations TEXT[];
 
 CREATE INDEX IF NOT EXISTS {table}_embedding_idx
     ON {table} USING hnsw (embedding vector_cosine_ops);
+-- Benchmark decision TODO (Task 4): At 1000 rows HNSW vs seq-scan is
+-- currently unmeasured at this scale. To decide whether this index earns
+-- its keep, run on a scratch table to avoid colliding with live data:
+--   table="influencers_bench" with 1000 balanced rows (every vector_store
+--   function already takes a table param for this). EXPLAIN (ANALYZE, BUFFERS)
+--   the search query twice (index present vs after DROP INDEX ..._embedding_idx)
+--   at top_k 10/50 × platform Any/specific. If seq-scan is within 1-2ms,
+--   drop this index and the ef_search tuning below; otherwise keep and
+--   replace this comment with the measured numbers.
 
 CREATE INDEX IF NOT EXISTS {table}_platform_idx ON {table} (platform);
 """
@@ -245,11 +254,13 @@ def search(
     platform: str,
     top_k: int,
     table: str = DEFAULT_TABLE,
+    niche: str | None = None,
 ) -> list[Influencer]:
     _validate_identifier(table)
 
     # ef_search varies per query (see below); iterative_scan was pinned at
     # connection configure time. One set_config roundtrip instead of two SETs.
+    # Use fetch size (top_k may be over-fetched by caller) for HNSW tuning.
     try:
         # Unfiltered (platform=Any) searches walk the whole HNSW graph, so
         # they get a larger ef_search to avoid under-fetching neighbors;
@@ -261,6 +272,15 @@ def search(
         )
     except Exception:
         pass
+
+    # Niche boost: when provided, subtract a fixed distance bonus for
+    # matching niche rows. This affects *which* rows the database returns,
+    # complementary to the Python niche_prior_sort which governs final
+    # presentation order and shortlist fill. Fixed at 0.05 per spec; tune
+    # only if 0.427→0.55 target is missed.
+    niche_boost_sql = ""
+    if niche:
+        niche_boost_sql = " - (CASE WHEN niche = %s THEN 0.05 ELSE 0 END)"
 
     sql = f"""
         SELECT id, handle, niche, platform, city, followers, engagement, tags, bio,
@@ -278,8 +298,11 @@ def search(
     if platform != "Any":
         sql += " WHERE platform = %s"
         params.append(platform)
-    sql += " ORDER BY embedding <=> %s LIMIT %s"
-    params.extend([query_embedding, top_k])
+    sql += f" ORDER BY (embedding <=> %s){niche_boost_sql} LIMIT %s"
+    params.append(query_embedding)
+    if niche:
+        params.append(niche)
+    params.append(top_k)
 
     rows = conn.execute(sql, params).fetchall()
     return [

@@ -24,8 +24,11 @@ was honest about fit quality:
   were a normal one.
 """
 
+import hashlib
 import json
 import logging
+import threading
+from collections import OrderedDict
 
 from google import genai
 from google.genai import errors, types
@@ -35,6 +38,25 @@ from .gemini_client import generate_content_throttled
 from .models import Brief, Influencer
 
 logger = logging.getLogger(__name__)
+
+# Deterministic ranking (temperature=0) means repeat briefs pay the full
+# ~1.8s Gemini round-trip for identical output. Small LRU on the *cleaned*
+# result list, mirroring src/embeddings.py::get_cached_query_vector.
+_RANK_CACHE_SIZE = 64
+_rank_cache: OrderedDict[str, list[dict]] = OrderedDict()
+_rank_cache_lock = threading.Lock()
+
+
+def _rank_cache_key(brief: Brief, candidates: list[Influencer], top_n: int) -> str:
+    ids = ",".join(str(c.id) for c in sorted(candidates, key=lambda c: c.id))
+    raw = f"{brief.niche}|{brief.platform}|{brief.audience}|{brief.vibe}|{top_n}|{ids}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _clear_rank_cache() -> None:
+    """Exposed for tests; not part of the public API."""
+    with _rank_cache_lock:
+        _rank_cache.clear()
 
 VALID_FIT_LEVELS = {"strong", "partial", "weak"}
 
@@ -163,6 +185,14 @@ def rank_candidates(
     candidates: list[Influencer],
     top_n: int = 5,
 ) -> list[dict]:
+    # Cache check (double-checked lock pattern, same as embeddings.py)
+    cache_key = _rank_cache_key(brief, candidates, top_n)
+    with _rank_cache_lock:
+        cached = _rank_cache.get(cache_key)
+        if cached is not None:
+            _rank_cache.move_to_end(cache_key)
+            return list(cached)
+
     candidates_by_id = {c.id: c for c in candidates}
     valid_ids = set(candidates_by_id.keys())
 
@@ -219,7 +249,12 @@ def rank_candidates(
             break
 
     if not cleaned:
-        return _fallback_ranking(candidates, top_n, reason="model returned no valid candidate ids")
+        fallback = _fallback_ranking(candidates, top_n, reason="model returned no valid candidate ids")
+        with _rank_cache_lock:
+            _rank_cache[cache_key] = list(fallback)
+            while len(_rank_cache) > _RANK_CACHE_SIZE:
+                _rank_cache.popitem(last=False)
+        return fallback
 
     # Model returned fewer valid entries than requested (e.g. top_n=5 but
     # only 1 valid id came back) -- fill the remaining slots from retrieval
@@ -238,4 +273,8 @@ def rank_candidates(
                 "source": "filled",
             })
 
+    with _rank_cache_lock:
+        _rank_cache[cache_key] = list(cleaned)
+        while len(_rank_cache) > _RANK_CACHE_SIZE:
+            _rank_cache.popitem(last=False)
     return cleaned

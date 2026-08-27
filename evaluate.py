@@ -23,11 +23,11 @@ from statistics import mean
 from time import perf_counter
 
 from src import config, vector_store
-from src.embeddings import embed_texts
+from src.embeddings import embed_texts, get_cached_query_vector
 from src.gemini_client import get_client
 from src.models import Brief
 from src.ranking import rank_candidates
-from src.retrieval import hybrid_retrieve
+from src.retrieval import niche_prior_sort
 
 DEFAULT_CASES = Path("data/evaluation_cases.json")
 
@@ -86,12 +86,30 @@ def _run_case(client, case: dict, top_k: int, top_n: int) -> dict:
     )
     expected_niche = case.get("expected_niche", brief.niche)
 
-    # Connection checkout happens before timing starts: pool contention
-    # under concurrency shouldn't count as retrieval latency.
+    # Split embed vs search timing so the report can distinguish model
+    # cost (Task 5) from index cost (Task 4). Connection checkout stays
+    # outside timing; retrieval_ms remains the sum for backward compat.
+    embed_start = perf_counter()
+    query_vec = get_cached_query_vector(brief.query_text())
+    embed_ms = round((perf_counter() - embed_start) * 1000, 1)
+
     with vector_store.get_connection() as conn:
-        retrieval_start = perf_counter()
-        candidates = hybrid_retrieve(conn, brief, top_k=top_k)
-        retrieval_ms = round((perf_counter() - retrieval_start) * 1000, 1)
+        # Replicate hybrid_retrieve's over-fetch + SQL niche boost + Python
+        # prior, but timed as one search block. Keeps hybrid_retrieve's API
+        # untouched for app code.
+        search_start = perf_counter()
+        fetch_k = min(top_k * 3, config.MAX_TOP_K)
+        candidates_raw = vector_store.search(
+            conn,
+            query_embedding=query_vec,
+            platform=brief.platform,
+            top_k=fetch_k,
+            niche=brief.niche,
+        )
+        candidates = niche_prior_sort(candidates_raw, brief.niche)[:top_k]
+        search_ms = round((perf_counter() - search_start) * 1000, 1)
+
+    retrieval_ms = round(embed_ms + search_ms, 1)
 
     ranking_start = perf_counter()
     ranked = rank_candidates(client, brief, candidates, top_n=top_n)
@@ -115,6 +133,8 @@ def _run_case(client, case: dict, top_k: int, top_n: int) -> dict:
         "filled_count": sum(1 for item in ranked if item.get("source") == "filled"),
         "strong_fit_count": sum(1 for item in ranked if item.get("fit") == "strong"),
         "retrieval_latency_ms": retrieval_ms,
+        "embed_latency_ms": embed_ms,
+        "search_latency_ms": search_ms,
         "ranking_latency_ms": ranking_ms,
     }
 
@@ -135,30 +155,36 @@ def main() -> None:
             raise RuntimeError("No indexed creators. Run main.py --reindex before evaluating.")
         _warmup(conn)
 
-    windows = [[i] for i in range(len(cases))] if args.sequential \
-        else batch_windows(len(cases), args.rate_limit_per_min)
-
     started = perf_counter()
-    for w, window in enumerate(windows):
-        window_start = perf_counter()
-        if not args.sequential and len(windows) > 1:
-            print(f"Window {w + 1}/{len(windows)}: cases "
-                  f"{window[0] + 1}-{window[-1] + 1} firing concurrently...")
-        with ThreadPoolExecutor(max_workers=len(window)) as pool:
-            futures = {
-                idx: pool.submit(_run_case, client, cases[idx], args.top_k, args.top_n)
-                for idx in window
-            }
-            for idx, future in futures.items():
-                case_results[idx] = future.result()
 
-        if len(windows) > 1:
-            elapsed = perf_counter() - window_start
-            remaining = 60.0 - elapsed
-            if remaining > 0 and w < len(windows) - 1:
-                print(f"  window done in {elapsed:.1f}s; waiting {remaining:.1f}s "
-                      f"to respect the per-minute quota")
-                time.sleep(remaining)
+    if args.sequential:
+        spacing = 60.0 / args.rate_limit_per_min
+        for idx, case in enumerate(cases):
+            if idx > 0:
+                time.sleep(spacing)
+            case_results[idx] = _run_case(client, case, args.top_k, args.top_n)
+    else:
+        windows = batch_windows(len(cases), args.rate_limit_per_min)
+        for w, window in enumerate(windows):
+            window_start = perf_counter()
+            if len(windows) > 1:
+                print(f"Window {w + 1}/{len(windows)}: cases "
+                      f"{window[0] + 1}-{window[-1] + 1} firing concurrently...")
+            with ThreadPoolExecutor(max_workers=len(window)) as pool:
+                futures = {
+                    idx: pool.submit(_run_case, client, cases[idx], args.top_k, args.top_n)
+                    for idx in window
+                }
+                for idx, future in futures.items():
+                    case_results[idx] = future.result()
+
+            if len(windows) > 1:
+                elapsed = perf_counter() - window_start
+                remaining = 60.0 - elapsed
+                if remaining > 0 and w < len(windows) - 1:
+                    print(f"  window done in {elapsed:.1f}s; waiting {remaining:.1f}s "
+                          f"to respect the per-minute quota")
+                    time.sleep(remaining)
 
     report_results = [r for r in case_results if r is not None]
     total_wall = perf_counter() - started
@@ -175,6 +201,8 @@ def main() -> None:
             "total_filled_slots": sum(item["filled_count"] for item in report_results),
             "mean_strong_fits_per_case": round(mean(item["strong_fit_count"] for item in report_results), 2),
             "mean_retrieval_latency_ms": round(mean(item["retrieval_latency_ms"] for item in report_results), 1),
+            "mean_embed_latency_ms": round(mean(item["embed_latency_ms"] for item in report_results), 1),
+            "mean_search_latency_ms": round(mean(item["search_latency_ms"] for item in report_results), 1),
             "mean_ranking_latency_ms": round(mean(item["ranking_latency_ms"] for item in report_results), 1),
             "wall_clock_seconds": round(total_wall, 1),
         },

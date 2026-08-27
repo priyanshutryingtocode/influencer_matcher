@@ -34,12 +34,17 @@ def hybrid_retrieve(
     top_k: int = 10,
     table: str = vector_store.DEFAULT_TABLE,
 ) -> list[Influencer]:
+    from . import config
+
     query_vec = get_cached_query_vector(brief.query_text())
+    fetch_k = min(top_k * 3, config.MAX_TOP_K)
     candidates = vector_store.search(
         conn,
         query_embedding=query_vec,
         platform=brief.platform,
-        top_k=top_k,
+        top_k=fetch_k,
         table=table,
+        niche=brief.niche,
     )
-    return niche_prior_sort(candidates, brief.niche)
+    ranked = niche_prior_sort(candidates, brief.niche)
+    return ranked[:top_k]
