@@ -7,7 +7,7 @@ A RAG pipeline that matches brand briefs to influencer profiles using Postgres +
 - **Local embeddings**: Sentence Transformers (`all-mpnet-base-v2`, 768-dim) — no API costs
 - **Platform hard filter**, niche/audience/vibe semantic matching
 - **Balanced data generation**: `--balanced` flag ensures minimum representation per (niche, platform)
-- **Max 1000 profiles** per run
+- **Max 5000 profiles** per run
 - **15 evaluation cases** covering niche×platform combinations
 
 ## Project Structure
@@ -64,12 +64,15 @@ python main.py
 # Rebuild with 500 balanced profiles
 python main.py --count 500 --reindex --balanced
 
-# Max size (1000)
-python main.py --count 1000 --reindex --balanced
+# Max size (5000)
+python main.py --count 5000 --reindex --balanced
 
 # Denser coverage per (niche, platform): count must be >= niches x platforms x floor
-# (30 x 9 = 270 combos, so floor 3 is the max that fits the 1000-profile cap)
+# (30 x 9 = 270 combos, so floor 3 is the max that fits the 1000-profile cap,
+#  floor 18 is the max that fits the 5000-profile cap)
 python main.py --count 810 --reindex --balanced --balanced-floor 3
+# For 5000 profiles with max uniformity:
+python main.py --count 5000 --reindex --balanced --balanced-floor 18
 
 # Custom brief
 python main.py --niche Fitness --platform TikTok \

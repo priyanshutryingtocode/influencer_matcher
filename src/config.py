@@ -40,7 +40,8 @@ DEFAULT_TOP_N_RANKED = 5
 
 # Hard ceilings so a mistyped CLI flag can't trigger an unexpectedly large
 # (and unexpectedly expensive) batch of embedding/generation calls.
-MAX_INFLUENCER_COUNT = 1000
+# 5000 allows floor 18 (270*18=4860) with headroom for over-fetch tests.
+MAX_INFLUENCER_COUNT = 5000
 MAX_TOP_K = 50
 
 # Gemini client resilience: fail fast instead of hanging, retry transient
