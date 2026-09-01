@@ -72,13 +72,21 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def ensure_indexed(conn, args) -> None:
+def ensure_indexed(args) -> None:
     """Only regenerate + re-embed if the table is empty or --reindex was
     passed. Generation and embedding happen entirely before any database
     write -- if anything fails partway (bad key, network, quota), nothing
     here has touched the database yet, so existing indexed data survives.
-    The clear-and-write itself is atomic (see vector_store.replace_influencers)."""
-    existing = vector_store.count_influencers(conn)
+    The clear-and-write itself is atomic (see vector_store.replace_influencers).
+
+    Connection checkouts are kept short: the pooled connection is not held
+    while generating or embedding (minutes of CPU work), which would otherwise
+    idle-timeout on Supabase's pooler and surface as
+    `Pipeline [BAD] / server closed the connection` on large reindexes.
+    """
+    # Quick existence check — short checkout
+    with vector_store.get_connection() as conn:
+        existing = vector_store.count_influencers(conn)
     if existing and not args.reindex:
         print(f"Found {existing} indexed profiles, skipping re-embedding.")
         return
@@ -95,7 +103,8 @@ def ensure_indexed(conn, args) -> None:
     index_influencers(influencers)
 
     print("Writing to the database (atomic replace)...")
-    vector_store.replace_influencers(conn, influencers)
+    with vector_store.get_connection() as conn:
+        vector_store.replace_influencers(conn, influencers)
 
 
 def main() -> None:
@@ -103,25 +112,27 @@ def main() -> None:
 
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
-        ensure_indexed(conn, args)
 
-        brief = Brief(
-            niche=args.niche,
-            platform=args.platform,
-            audience=args.audience,
-            vibe=args.vibe,
-        )
-        print_brief(brief)
+    ensure_indexed(args)
 
-        print("\nRetrieving candidates (metadata filter + pgvector search)...")
+    brief = Brief(
+        niche=args.niche,
+        platform=args.platform,
+        audience=args.audience,
+        vibe=args.vibe,
+    )
+    print_brief(brief)
+
+    print("\nRetrieving candidates (metadata filter + pgvector search)...")
+    with vector_store.get_connection() as conn:
         candidates = hybrid_retrieve(conn, brief, top_k=args.top_k)
-        if not candidates:
-            print("No creators found for that platform.")
-            return
-        print(f"  {len(candidates)} candidates returned")
+    if not candidates:
+        print("No creators found for that platform.")
+        return
+    print(f"  {len(candidates)} candidates returned")
 
-        print("\nRanking with Gemini...")
-        ranked = rank_candidates(get_client(), brief, candidates, top_n=args.top_n)
+    print("\nRanking with Gemini...")
+    ranked = rank_candidates(get_client(), brief, candidates, top_n=args.top_n)
 
     candidates_by_id = {c.id: c for c in candidates}
     print_results(ranked, candidates_by_id, brief=brief)

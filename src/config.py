@@ -23,16 +23,16 @@ GEN_MODEL = "gemini-2.5-flash-lite"
 # Embeddings are computed locally with Sentence Transformers (no API cost);
 # this name is recorded per-row in the database's embed_model column so the
 # provenance of stored vectors is always traceable.
-LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
-# all-mpnet-base-v2 outputs 768-dim vectors. This must match the VECTOR(...)
+LOCAL_EMBED_MODEL = "intfloat/e5-base-v2"
+# intfloat/e5-base-v2 outputs 768-dim vectors. This must match the VECTOR(...)
 # column width in vector_store.py -- changing the model means reindexing.
 EMBED_DIMENSIONS = 768
 
 # Some embedding families expect instruction prefixes (e5 wants "query: "/
 # "passage: ", bge wants a search directive; mpnet wants nothing). These are
 # prepended in embeddings.py before encoding. See README "Embedding model A/B".
-EMBED_QUERY_PREFIX = ""
-EMBED_PASSAGE_PREFIX = ""
+EMBED_QUERY_PREFIX = "query: "
+EMBED_PASSAGE_PREFIX = "passage: "
 
 DEFAULT_INFLUENCER_COUNT = 60
 DEFAULT_TOP_K_RETRIEVAL = 10
