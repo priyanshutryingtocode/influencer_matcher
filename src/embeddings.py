@@ -82,7 +82,8 @@ def get_cached_query_vector(text: str) -> np.ndarray:
         if cached is not None:
             _query_cache.move_to_end(key)
             return cached
-    vec = embed_texts([config.EMBED_QUERY_PREFIX + text])[0]
+    # Bypass embed_texts' passage prefix — queries need the query prefix only.
+    vec = embed_texts_local([config.EMBED_QUERY_PREFIX + text])[0]
     with _query_cache_lock:
         _query_cache[key] = vec
         while len(_query_cache) > _QUERY_CACHE_SIZE:

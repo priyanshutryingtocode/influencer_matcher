@@ -98,11 +98,11 @@ def _build_prompt(brief: Brief, candidates: list[Influencer], top_n: int) -> str
             "niche": c.niche,
             "secondary_niches": c.secondary_niches[:4],
             "platform": c.platform,
-            "tags": c.tags[:6],
+            "tags": c.tags[:4],
             "content_style": c.content_style,
             "followers": c.followers,
             "engagement_rate": c.engagement,
-            "bio": c.bio[:240],
+            "bio": c.bio[:160],
         }
         for c in candidates
     ]
@@ -172,6 +172,7 @@ def _gen_config() -> types.GenerateContentConfig:
         "response_mime_type": "application/json",
         "response_schema": RANKING_SCHEMA,
         "temperature": 0.0,
+        "max_output_tokens": 512,
     }
     thinking = getattr(types, "ThinkingConfig", None)
     if thinking is not None:
