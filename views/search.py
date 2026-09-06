@@ -62,7 +62,7 @@ def render_search() -> None:
     try:
         run_id = run_store.save_run(brief, ranked, candidates, params=result["params"])
         st.session_state["last_run_id"] = run_id
-        st.sidebar.toast("Run saved to history", icon="\U0001F4BE")
+        st.toast("Run saved to history", icon="\U0001F4BE")
     except OSError as e:
         st.sidebar.warning(f"Could not save this run to history: {e}")
 
