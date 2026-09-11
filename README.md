@@ -4,7 +4,7 @@ A RAG pipeline that matches brand briefs to influencer profiles using Postgres +
 
 ## Key Features
 
-- **Local embeddings**: Sentence Transformers (`all-mpnet-base-v2`, 768-dim) — no API costs
+- **Local embeddings**: Sentence Transformers (`intfloat/e5-base-v2`, 768-dim) — no API costs
 - **Platform hard filter**, niche/audience/vibe semantic matching
 - **Balanced data generation**: `--balanced` flag ensures minimum representation per (niche, platform)
 - **Max 5000 profiles** per run
@@ -101,8 +101,10 @@ A three-page interface (requires streamlit >= 1.40):
 Embeddings are computed locally with Sentence Transformers — no API cost, no
 network calls. Configured in `src/config.py`:
 ```python
-LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
+LOCAL_EMBED_MODEL = "intfloat/e5-base-v2"
 EMBED_DIMENSIONS = 768
+EMBED_QUERY_PREFIX = "query: "
+EMBED_PASSAGE_PREFIX = "passage: "
 ```
 The model name is stored per-row in the database (`embed_model` column) so
 vector provenance stays traceable. Changing the model requires a `--reindex`.
@@ -112,11 +114,15 @@ vector provenance stays traceable. Changing the model requires a `--reindex`.
 `src/config.py` exposes three knobs for comparing embedding families:
 
 ```python
-LOCAL_EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"  # baseline
-EMBED_QUERY_PREFIX = ""    # e.g. "query: " (e5) or a search directive (bge)
-EMBED_PASSAGE_PREFIX = ""  # e.g. "passage: " (e5)
+LOCAL_EMBED_MODEL = "intfloat/e5-base-v2"  # current winner
+EMBED_QUERY_PREFIX = "query: "
+EMBED_PASSAGE_PREFIX = "passage: "
 EMBED_DIMENSIONS = 768     # must match the model output; checked at load
 ```
+
+**Current production config:** `intfloat/e5-base-v2` with `query:` / `passage:` prefixes
+achieves **1.0 retrieval precision** and **1.0 ranked precision** at 5000 profiles
+(floor 18). See `reports/report-e5-5000.json` for the full evaluation.
 
 Procedure per candidate model:
 
@@ -136,4 +142,14 @@ Candidates worth trying (all 768-dim, so no schema change): `intfloat/e5-base-v2
 python evaluate.py
 ```
 Outputs `reports/evaluation-report.json` with retrieval precision@K, ranked precision@N, fallback rate, and latency. 15 cases cover "Any" platform and platform-specific briefs.
+
+## Reports Directory
+
+Generated evaluation reports are stored in the `reports/` directory:
+
+- `reports/evaluation-report.json` — Default output of `python evaluate.py`
+- `reports/report-<model>.json` — Custom outputs via `--output` flag
+- All historical reports from previous evaluation runs are kept in `reports/` for comparison.
+
+To view a report: `cat reports/report-e5-5000.json`
 
