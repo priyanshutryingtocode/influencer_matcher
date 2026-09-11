@@ -2,7 +2,7 @@
 
 Usage:
     python evaluate.py
-    python evaluate.py --top-k 10 --top-n 5 --output evaluation-report.json
+    python evaluate.py --top-k 10 --top-n 5 --output reports/evaluation-report.json
     python evaluate.py --sequential   # old one-at-a-time pacing
 
 Exact niche match is the relevance label for this synthetic dataset. Replace
@@ -35,7 +35,7 @@ DEFAULT_CASES = Path("data/evaluation_cases.json")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate influencer retrieval and ranking quality.")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES, help="JSON golden-brief dataset")
-    parser.add_argument("--output", type=Path, default=Path("evaluation-report.json"), help="JSON metrics output")
+    parser.add_argument("--output", type=Path, default=Path("reports/evaluation-report.json"), help="JSON metrics output (written to reports/)")
     parser.add_argument("--top-k", type=int, default=config.DEFAULT_TOP_K_RETRIEVAL)
     parser.add_argument("--top-n", type=int, default=config.DEFAULT_TOP_N_RANKED)
     parser.add_argument(

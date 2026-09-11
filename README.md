@@ -24,7 +24,7 @@ influencer_matcher/
 │   ├── cards.py              #   reusable result-card renderer
 │   ├── compare_logic.py      #   pure diff/summary math
 │   └── run_store.py          #   local JSON persistence + CSV export
-├── evaluate.py               # golden-brief evaluation → evaluation-report.json
+├── evaluate.py               # golden-brief evaluation → reports/evaluation-report.json
 ├── requirements.txt
 ├── .env                      # GEMINI_API_KEY + DATABASE_URL (gitignored)
 ├── data/
@@ -122,7 +122,7 @@ Procedure per candidate model:
 
 1. Set `LOCAL_EMBED_MODEL` + prefixes in `src/config.py`
 2. `python main.py --count 810 --reindex --balanced --balanced-floor 3`
-3. `python evaluate.py --output report-<model>.json`
+3. `python evaluate.py --output reports/report-<model>.json`
 4. Compare `mean_ranked_niche_precision_at_n`, hit-rate, and latencies across reports; keep the winner and re-run step 2 with it
 
 Candidates worth trying (all 768-dim, so no schema change): `intfloat/e5-base-v2`
@@ -135,5 +135,5 @@ Candidates worth trying (all 768-dim, so no schema change): `intfloat/e5-base-v2
 ```bash
 python evaluate.py
 ```
-Outputs `evaluation-report.json` with retrieval precision@K, ranked precision@N, fallback rate, and latency. 15 cases cover "Any" platform and platform-specific briefs.
+Outputs `reports/evaluation-report.json` with retrieval precision@K, ranked precision@N, fallback rate, and latency. 15 cases cover "Any" platform and platform-specific briefs.
 
