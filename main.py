@@ -77,14 +77,7 @@ def ensure_indexed(args) -> None:
     passed. Generation and embedding happen entirely before any database
     write -- if anything fails partway (bad key, network, quota), nothing
     here has touched the database yet, so existing indexed data survives.
-    The clear-and-write itself is atomic (see vector_store.replace_influencers).
-
-    Connection checkouts are kept short: the pooled connection is not held
-    while generating or embedding (minutes of CPU work), which would otherwise
-    idle-timeout on Supabase's pooler and surface as
-    `Pipeline [BAD] / server closed the connection` on large reindexes.
     """
-    # Quick existence check — short checkout
     with vector_store.get_connection() as conn:
         existing = vector_store.count_influencers(conn)
     if existing and not args.reindex:

@@ -73,7 +73,7 @@ def save_run(brief: Brief, ranked: list[dict], candidates: list[Influencer],
     path = RUNS_DIR / f"{run_id}.json"
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
-    tmp.replace(path)  # atomic-ish on both POSIX and Windows
+    tmp.replace(path)  
     return run_id
 
 

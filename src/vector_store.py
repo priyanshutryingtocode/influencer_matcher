@@ -13,10 +13,6 @@ from .models import Influencer
 
 DEFAULT_TABLE = "influencers"
 
-# A persistent pool avoids the per-query TCP+TLS+auth handshake to Supabase,
-# which costs more than the vector search itself. Session pooler (the README's
-# documented setup) is designed for long-lived connections. Pool creation is
-# lazy and guarded so importing this module never opens network connections.
 _pool: ConnectionPool | None = None
 _pool_lock = threading.Lock()
 
@@ -31,7 +27,7 @@ def _configure_connection(conn: psycopg.Connection) -> None:
     try:
         conn.execute("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', false)")
     except Exception:
-        pass  # non-pgvector database; searches will still work unoptimized
+        pass 
 
 
 def _get_pool() -> ConnectionPool:
@@ -258,9 +254,6 @@ def search(
 ) -> list[Influencer]:
     _validate_identifier(table)
 
-    # ef_search varies per query (see below); iterative_scan was pinned at
-    # connection configure time. One set_config roundtrip instead of two SETs.
-    # Use fetch size (top_k may be over-fetched by caller) for HNSW tuning.
     try:
         # Unfiltered (platform=Any) searches walk the whole HNSW graph, so
         # they get a larger ef_search to avoid under-fetching neighbors;
@@ -274,10 +267,7 @@ def search(
         pass
 
     # Niche boost: when provided, subtract a fixed distance bonus for
-    # matching niche rows. This affects *which* rows the database returns,
-    # complementary to the Python niche_prior_sort which governs final
-    # presentation order and shortlist fill. Fixed at 0.05 per spec; tune
-    # only if 0.427→0.55 target is missed.
+    # matching niche rows.
     niche_boost_sql = ""
     if niche:
         niche_boost_sql = " - (CASE WHEN niche = %s THEN 0.05 ELSE 0 END)"

@@ -18,13 +18,7 @@ def get_gemini_client():
 
 def get_indexed_count() -> int | None:
     """Return the number of indexed profiles, or None if the database is
-    unreachable (after rendering an error banner).
-
-    Connects fresh each call rather than caching the DB connection --
-    a cached connection shared across every Streamlit session isn't safe
-    to use concurrently, and this is just a cheap COUNT query. Callers
-    decide whether to st.stop() (search needs the DB; history/compare
-    work from local files and never ask)."""
+    unreachable (after rendering an error banner)."""
     try:
         with vector_store.get_connection() as conn:
             vector_store.init_schema(conn)

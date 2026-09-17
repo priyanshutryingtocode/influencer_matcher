@@ -86,17 +86,11 @@ def _run_case(client, case: dict, top_k: int, top_n: int) -> dict:
     )
     expected_niche = case.get("expected_niche", brief.niche)
 
-    # Split embed vs search timing so the report can distinguish model
-    # cost (Task 5) from index cost (Task 4). Connection checkout stays
-    # outside timing; retrieval_ms remains the sum for backward compat.
     embed_start = perf_counter()
     query_vec = get_cached_query_vector(brief.query_text())
     embed_ms = round((perf_counter() - embed_start) * 1000, 1)
 
     with vector_store.get_connection() as conn:
-        # Replicate hybrid_retrieve's over-fetch + SQL niche boost + Python
-        # prior, but timed as one search block. Keeps hybrid_retrieve's API
-        # untouched for app code.
         search_start = perf_counter()
         fetch_k = min(top_k * 3, config.MAX_TOP_K)
         candidates_raw = vector_store.search(
@@ -125,10 +119,6 @@ def _run_case(client, case: dict, top_k: int, top_n: int) -> dict:
         "retrieval_niche_hit_at_k": any(c.niche == expected_niche for c in candidates),
         "ranked_niche_precision_at_n": round(niche_precision(ranked_candidates, expected_niche), 3),
         "ranking_fallback": any(item.get("source") == "fallback" for item in ranked),
-        # Degradation + fit observability: nonzero filled/fallback counts mean
-        # slots came from retrieval order (where the niche prior operates)
-        # rather than LLM judgment; strong counts show how confident the
-        # ranker was overall.
         "fallback_count": sum(1 for item in ranked if item.get("source") == "fallback"),
         "filled_count": sum(1 for item in ranked if item.get("source") == "filled"),
         "strong_fit_count": sum(1 for item in ranked if item.get("fit") == "strong"),
@@ -148,7 +138,6 @@ def main() -> None:
     client = get_client()
     case_results: list[dict | None] = [None] * len(cases)
 
-    # Warm the model + pool before any timing; also verifies data exists.
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
         if not vector_store.count_influencers(conn):

@@ -15,12 +15,7 @@ from .models import Brief, Influencer
 def niche_prior_sort(candidates: list[Influencer], niche: str) -> list[Influencer]:
     """Reorder retrieved candidates so creators whose primary or secondary
     niches include the brief's niche come first, similarity order preserved
-    within each group (stable sort).
-
-    This does not change *which* candidates were retrieved (pgvector's top_k
-    already fixed that) -- only the order the LLM ranker sees them in, and
-    the order used when shortlist slots get filled from retrieval. Zero API
-    cost; evaluate.py's precision@k is order-independent and stays comparable."""
+    within each group (stable sort)."""
     def sort_key(inf: Influencer):
         on_niche = 0 if niche in {inf.niche, *inf.secondary_niches} else 1
         return (on_niche, -(inf.similarity or 0.0))

@@ -180,7 +180,6 @@ def generate_balanced_influencers(
     creators: list[Influencer] = []
     creator_id = 0
     
-    # Track how many we've generated per niche and per (niche, platform)
     niche_counts: dict[str, int] = {n: 0 for n in niches}
     combo_counts: dict[tuple[str, str], int] = {(n, p): 0 for n in niches for p in platforms}
     
@@ -227,16 +226,13 @@ def generate_balanced_influencers(
     # Pass 3: Fill remaining quota proportionally
     remaining = count - creator_id
     if remaining > 0:
-        # Create weighted list of combos based on current deficit
         combo_weights = []
         for niche in niches:
             for platform in platforms:
                 combo = (niche, platform)
-                # Weight inversely proportional to current count
                 weight = 1.0 / (combo_counts[combo] + 1)
                 combo_weights.append((combo, weight))
         
-        # Normalize weights
         total_weight = sum(w for _, w in combo_weights)
         combo_probs = [(combo, w / total_weight) for combo, w in combo_weights]
         
@@ -267,10 +263,8 @@ def generate_balanced_influencers(
             combo_counts[(niche, platform)] += 1
             creator_id += 1
 
-    # Shuffle to avoid ordering bias
     rng.shuffle(creators)
     
-    # Reassign IDs after shuffle
     for i, inf in enumerate(creators):
         inf.id = i
     

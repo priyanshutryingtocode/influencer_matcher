@@ -6,15 +6,13 @@ import threading
 from collections import OrderedDict
 
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
 from . import config
 from .models import Influencer
 
 BATCH_SIZE = 50
 
-# Cache the Sentence Transformer model. Loading is check-then-set over a
-# module global, so the double-checked lock keeps concurrent Streamlit
-# threads (and the app-shell warmup thread) from loading twice.
 _sentence_transformer = None
 _model_lock = threading.Lock()
 
@@ -39,7 +37,6 @@ def get_sentence_transformer() -> "SentenceTransformer":
 def _check_dimensions(model) -> None:
     """Fail loudly if the configured model's output width doesn't match the
     VECTOR(...) column -- pgvector would reject every insert otherwise."""
-    # Probe without prefix is fine; dimension is same with/without.
     probe = np.asarray(model.encode(["dim"], show_progress_bar=False))
     if probe.shape[-1] != config.EMBED_DIMENSIONS:
         raise RuntimeError(
@@ -58,18 +55,11 @@ def embed_texts(texts: list[str]) -> list[np.ndarray]:
 def embed_texts_local(texts: list[str]) -> list[np.ndarray]:
     """Embed texts using Sentence Transformer model."""
     model = get_sentence_transformer()
-    # Sentence Transformers returns numpy array of shape (len(texts), embedding_dim)
     embeddings = model.encode(texts, show_progress_bar=False)
-    # Convert to list of individual numpy arrays for compatibility
     if len(embeddings.shape) == 1:
         return [embeddings]
     return [embeddings[i] for i in range(len(embeddings))]
 
-
-# --- query-vector cache -----------------------------------------------------
-# Retrieval embeds one query per search; repeat briefs (common in demos and
-# when tweaking sliders) can skip the encode entirely. Small LRU keyed by
-# text hash so identical queries share vectors.
 _QUERY_CACHE_SIZE = 128
 _query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 _query_cache_lock = threading.Lock()
@@ -82,7 +72,6 @@ def get_cached_query_vector(text: str) -> np.ndarray:
         if cached is not None:
             _query_cache.move_to_end(key)
             return cached
-    # Bypass embed_texts' passage prefix — queries need the query prefix only.
     vec = embed_texts_local([config.EMBED_QUERY_PREFIX + text])[0]
     with _query_cache_lock:
         _query_cache[key] = vec

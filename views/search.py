@@ -10,13 +10,13 @@ from views.shared import get_indexed_count, run_pipeline
 
 def render_search() -> None:
     st.subheader("Find creators for a brand brief")
-    st.caption("Postgres/pgvector retrieval + Gemini reasoning. Runs are saved locally to .runs/.")
+    st.caption("Postgres/pgvector retrieval + Gemini reasoning.")
 
     indexed_count = get_indexed_count()
     if indexed_count is None:
         st.stop()
     if indexed_count == 0:
-        st.info("No creators indexed yet. Contact your administrator to add creators to the database.")
+        st.info("No creators indexed yet.")
         st.stop()
     st.sidebar.caption(f"{indexed_count} creators indexed")
 
@@ -24,8 +24,8 @@ def render_search() -> None:
     with col_brief:
         niche = st.selectbox("Niche", list(NICHES.keys()))
         platform = st.segmented_control("Platform", ["Any", *PLATFORMS], selection_mode="single", default="Any")
-        audience = st.text_input("Target audience", "Gen Z, sustainability-minded")
-        vibe = st.text_area("Vibe / tone", "warm, low-key, not overly polished")
+        audience = st.text_input("Target audience", "Gen Z")
+        vibe = st.text_area("Vibe / tone", "")
     with col_settings:
         top_k = st.slider("Candidates to retrieve", 5, 30, 10)
         top_n = st.slider("Final shortlist size", 1, max(top_k, 1), min(5, top_k))

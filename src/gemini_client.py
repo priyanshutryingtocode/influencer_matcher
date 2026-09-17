@@ -11,9 +11,6 @@ from . import config
 
 logger = logging.getLogger(__name__)
 
-# Free-tier (and many paid-tier) quotas throttle generate_content bursts. On
-# a 429 the API tells us exactly how long to wait; honor that backoff and
-# retry instead of immediately treating the throttle as an outage.
 _RETRY_MESSAGE_MS = re.compile(r"Please retry in ([\d.]+)s", re.IGNORECASE)
 
 

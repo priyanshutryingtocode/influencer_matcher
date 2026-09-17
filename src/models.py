@@ -4,9 +4,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-# Niches and their topic keywords, so query vectors and profile vectors share
-# vocabulary. Imported lazily inside Brief.query_text to avoid a circular
-# import at module load; the mapping is a plain dict, so this is cheap.
 _NICHES = None
 
 
@@ -49,7 +46,7 @@ class Influencer:
 @dataclass
 class Brief:
     niche: str
-    platform: str  # "Any" or one of PLATFORMS
+    platform: str  
     audience: str = ""
     vibe: str = ""
 
