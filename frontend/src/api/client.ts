@@ -12,6 +12,7 @@ import type {
 const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const isLocalHost = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 export const isApiConfigured = Boolean(baseUrl) || (import.meta.env.DEV && isLocalHost);
+export const backendWakeTimeoutMs = 120_000;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -56,6 +57,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+async function probeBackend(timeoutMs = backendWakeTimeoutMs): Promise<void> {
+  if (import.meta.env.PROD && !isApiConfigured) {
+    throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/health/live`, { signal: controller.signal });
+    if (!response.ok) throw new ApiError("The backend responded with an error.", response.status, null);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError("The backend took too long to start. Try again in a moment.", 408, null);
+    }
+    throw new ApiError("The backend could not be reached.", 0, null);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function downloadFile(path: string, filename: string) {
   if (import.meta.env.PROD && !isApiConfigured) {
     throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
@@ -81,6 +102,7 @@ async function downloadFile(path: string, filename: string) {
 }
 
 export const api = {
+  probeBackend: () => probeBackend(),
   getMeta: () => request<Meta>("/api/v1/meta"),
   createMatchJob: (brief: Brief, params: MatchParams) =>
     request<MatchJob>("/api/v1/match-jobs", {

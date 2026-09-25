@@ -2,6 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { AccountMenu } from "./AccountMenu";
+import { BackendStatus } from "./BackendStatus";
 
 export function Layout() {
   const { user, signOut, isConfigured } = useAuth();
@@ -29,6 +30,7 @@ export function Layout() {
             </NavLink>
           </nav>
           <div className="account-slot">
+            {import.meta.env.VITE_DEMO_MODE === "true" && <BackendStatus />}
             {isConfigured && user && <AccountMenu user={user} signOut={signOut} />}
           </div>
         </div>
