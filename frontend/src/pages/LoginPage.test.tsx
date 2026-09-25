@@ -1,15 +1,18 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LoginPage } from "./LoginPage";
 
 const authMocks = vi.hoisted(() => ({
+  session: null as unknown,
   signInWithPassword: vi.fn(),
   signUp: vi.fn(),
 }));
 
 vi.mock("../auth/AuthProvider", () => ({
   useAuth: () => ({
+    session: authMocks.session,
     isConfigured: true,
     signInWithPassword: authMocks.signInWithPassword,
     signUp: authMocks.signUp,
@@ -18,12 +21,27 @@ vi.mock("../auth/AuthProvider", () => ({
 
 describe("LoginPage", () => {
   beforeEach(() => {
+    authMocks.session = null;
     authMocks.signInWithPassword.mockReset();
     authMocks.signUp.mockReset();
   });
 
   afterEach(() => {
     cleanup();
+  });
+
+  it("redirects an authenticated visitor to search", async () => {
+    authMocks.session = {};
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/search" element={<div>Search page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Search page")).toBeTruthy();
   });
 
   it("signs in with email and password", async () => {

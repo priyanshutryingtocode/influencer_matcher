@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { Navigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 
@@ -8,7 +9,7 @@ type AuthMode = "signin" | "signup";
 const minimumPasswordLength = 8;
 
 export function LoginPage() {
-  const { isConfigured, signInWithPassword, signUp } = useAuth();
+  const { session, isConfigured, signInWithPassword, signUp } = useAuth();
   const [mode, setMode] = useState<AuthMode>("signin");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -17,6 +18,8 @@ export function LoginPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (session) return <Navigate to="/search" replace />;
 
   function changeMode(nextMode: AuthMode) {
     setMode(nextMode);
