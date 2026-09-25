@@ -4,12 +4,19 @@ import type { Session, User } from "@supabase/supabase-js";
 
 import { isAuthConfigured, supabase } from "../lib/supabase";
 
+export interface SignUpCredentials {
+  displayName: string;
+  email: string;
+  password: string;
+}
+
 interface AuthContextValue {
   session: Session | null;
   user: User | null;
   loading: boolean;
   isConfigured: boolean;
-  signInWithEmail: (email: string) => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
+  signUp: (credentials: SignUpCredentials) => Promise<boolean>;
   signOut: () => Promise<void>;
 }
 
@@ -25,12 +32,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (active) {
+    void supabase.auth.getSession()
+      .then(({ data }) => {
+        if (!active) return;
         setSession(data.session);
         setLoading(false);
-      }
-    });
+      })
+      .catch(() => {
+        if (!active) return;
+        setSession(null);
+        setLoading(false);
+      });
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!active) return;
       setSession(nextSession);
@@ -47,18 +59,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: session?.user ?? null,
     loading,
     isConfigured: isAuthConfigured,
-    signInWithEmail: async (email: string) => {
+    signInWithPassword: async (email: string, password: string) => {
       if (!supabase) throw new Error("Supabase Auth is not configured.");
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: window.location.origin },
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
       });
       if (error) throw error;
+      if (!data.session) throw new Error("Sign in did not return a session.");
+      setSession(data.session);
+    },
+    signUp: async ({ displayName, email, password }: SignUpCredentials) => {
+      if (!supabase) throw new Error("Supabase Auth is not configured.");
+      const normalizedEmail = email.trim();
+      const resolvedName = displayName.trim() || normalizedEmail.split("@")[0];
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: { data: { display_name: resolvedName } },
+      });
+      if (error) throw error;
+      if (data.session) setSession(data.session);
+      return Boolean(data.session);
     },
     signOut: async () => {
       if (!supabase) return;
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
+      setSession(null);
     },
   }), [loading, session]);
 

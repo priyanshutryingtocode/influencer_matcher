@@ -4,6 +4,10 @@ import { useAuth } from "../auth/AuthProvider";
 
 export function Layout() {
   const { user, signOut, isConfigured } = useAuth();
+  const metadataName = user?.user_metadata?.display_name;
+  const accountLabel = typeof metadataName === "string" && metadataName.trim()
+    ? metadataName.trim()
+    : user?.email ?? "Account";
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
@@ -27,7 +31,7 @@ export function Layout() {
               <span className="nav-index">03</span>Compare
             </NavLink>
           </nav>
-          {isConfigured && user && <button className="auth-signout" type="button" onClick={() => void signOut()}>{user.email ?? "Sign out"}</button>}
+          {isConfigured && user && <button className="auth-signout" type="button" title="Sign out" onClick={() => void signOut()}>{accountLabel}</button>}
         </div>
       </header>
       {import.meta.env.VITE_DEMO_MODE === "true" && (

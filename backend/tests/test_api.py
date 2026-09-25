@@ -1,13 +1,15 @@
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import jwt
 from fastapi.testclient import TestClient
 
 from api.jobs.manager import JobManager
 from api.main import create_app
 from api.schemas.models import MatchJobResponse, MatchParams
 from api.serialization import build_run_record
+from src import config
 from src.models import Brief, Influencer
 
 
@@ -241,3 +243,43 @@ def test_api_rejects_invalid_brief_when_not_ready():
         )
         assert ready_response.status_code == 503
         assert ready_response.json()["detail"]["code"] == "INDEX_NOT_READY"
+
+
+def test_demo_ip_rate_limit_blocks_repeated_matches(monkeypatch):
+    monkeypatch.setattr(config, "APP_ENV", "demo")
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://demo")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "demo-key")
+    monkeypatch.setattr(config, "SUPABASE_URL", "https://demo.supabase.co")
+    monkeypatch.setattr(config, "SUPABASE_JWT_SECRET", "test-secret-that-is-at-least-32-bytes")
+    monkeypatch.setattr(config, "SUPABASE_JWKS_URL", None)
+    monkeypatch.setattr(config, "SUPABASE_ISSUER", None)
+    monkeypatch.setattr(config, "MAX_MATCH_JOBS_PER_IP_PER_HOUR", 1)
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://demo.vercel.app")
+    app = create_app(
+        repository=MemoryRepository(),
+        job_manager=MemoryJobManager(),
+        initialize_database=False,
+        indexed_count=10,
+        job_backend="memory",
+    )
+    payload = {
+        "brief": {"niche": "Fitness", "platform": "Any", "audience": "Gen Z", "vibe": "warm"},
+        "params": {"top_k": 3, "top_n": 1},
+    }
+    token = jwt.encode(
+        {
+            "sub": str(uuid4()),
+            "aud": "authenticated",
+            "role": "authenticated",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        },
+        "test-secret-that-is-at-least-32-bytes",
+        algorithm="HS256",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    with TestClient(app) as client:
+        assert client.post("/api/v1/match-jobs", json=payload, headers=headers).status_code == 202
+        limited = client.post("/api/v1/match-jobs", json=payload, headers=headers)
+        assert limited.status_code == 429
+        assert limited.json()["detail"]["code"] == "MATCH_IP_RATE_LIMIT"

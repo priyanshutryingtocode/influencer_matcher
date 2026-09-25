@@ -10,6 +10,7 @@ A RAG pipeline that matches brand briefs to influencer profiles using PostgreSQL
 - FastAPI backend with asynchronous match jobs
 - React + TypeScript Search, History, and Compare pages
 - PostgreSQL run history with complete creator snapshots
+- Supabase email/password accounts with isolated per-user history
 - Seeded balanced synthetic data generation and golden-case evaluation
 
 ## Architecture
@@ -76,9 +77,9 @@ The creator index is built from the CLI before the API or frontend can search it
 ```bash
 cd backend
 ../venv/Scripts/python main.py
-../venv/Scripts/python main.py --count 500 --reindex --balanced
+../venv/Scripts/python main.py --count 810 --reindex --balanced
 ../venv/Scripts/python main.py --count 5000 --reindex --balanced --balanced-floor 18
-../venv/Scripts/python main.py --index-only --balanced
+../venv/Scripts/python main.py --index-only --count 810 --balanced
 ../venv/Scripts/python main.py --niche Fitness --platform TikTok --audience "millennials" --vibe "high energy"
 ```
 
@@ -128,6 +129,7 @@ The old local `.runs/` files are not imported into the new PostgreSQL history st
 
 The frontend contains:
 
+- Supabase email/password sign-in and account creation
 - Search form with staged job progress, warnings, result cards, evidence, and CSV export
 - PostgreSQL-backed History with run detail and deletion
 - Side-by-side Compare with summary metrics and shared creators highlighted
@@ -173,6 +175,7 @@ Important settings are in `backend/src/config.py` and `.env`:
 - `RUN_SCHEMA_ON_STARTUP`
 - `MAX_MEMORY_JOBS`
 - `MAX_MATCH_JOBS_PER_USER_PER_HOUR`
+- `MAX_MATCH_JOBS_PER_IP_PER_HOUR`
 - `STALE_JOB_AFTER_SECONDS`
 
 Changing the embedding model or vector width requires reindexing. Run history stores creator snapshots and a `creator_key` composed as `platform:handle` for comparisons. Synthetic handles can change when the data is regenerated; real data should use a durable platform creator ID.
@@ -184,19 +187,20 @@ The deployment topology is Render for the API, Vercel for the React frontend, an
 ### Supabase
 
 1. Enable the `vector` extension.
-2. Enable Supabase Auth and configure the production email provider.
-3. Add the Vercel site URL and local development URL to the Supabase Auth redirect allowlist. The magic-link flow returns to the current frontend origin.
-4. Rebuild the approved synthetic creator index with the lightweight embedding model. Run migrations first so the vector dimension is corrected before indexing:
+2. Open **Authentication → Sign In Providers → Email**, enable email/password authentication, and leave **Allow new users to sign up** enabled.
+3. Turn **Confirm email** off so account creation returns a session immediately without SMTP. Set a minimum password length of at least 8 and enable leaked-password protection.
+4. Add the Vercel site URL and local development URL to the Supabase Auth URL configuration.
+5. Rebuild the approved synthetic creator index with the lightweight embedding model. Run migrations first so the vector dimension is corrected before indexing:
 
 ```bash
 cd backend
 ../venv/Scripts/python -m api.migrate
-../venv/Scripts/python main.py --index-only --balanced
+../venv/Scripts/python main.py --index-only --count 810 --balanced
 ```
 
 `api.migrate` applies the numbered migrations in lexical order. Migration `004` recreates the creator embedding column as `vector(384)` and clears the old synthetic rows; `main.py --index-only` then repopulates them. The API uses a direct server-side PostgreSQL connection with table-owner or `BYPASSRLS` permissions. Never use the browser Supabase URL or anon key as `DATABASE_URL`.
 
-The API supports either Supabase legacy `HS256` tokens (`SUPABASE_JWT_SECRET`) or asymmetric tokens (`SUPABASE_JWKS_URL`). Set `SUPABASE_ISSUER` only when it differs from `<SUPABASE_URL>/auth/v1`; `SUPABASE_JWT_AUDIENCE` defaults to `authenticated`.
+The API supports either Supabase legacy `HS256` tokens (`SUPABASE_JWT_SECRET`) or asymmetric tokens (`SUPABASE_JWKS_URL`). Set `SUPABASE_ISSUER` only when it differs from `<SUPABASE_URL>/auth/v1`; `SUPABASE_JWT_AUDIENCE` defaults to `authenticated`. Password reset and email-change flows are intentionally omitted because they require custom SMTP.
 
 ### Render
 
@@ -205,7 +209,7 @@ The API supports either Supabase legacy `HS256` tokens (`SUPABASE_JWT_SECRET`) o
 - `influencer-matcher-api`: builds with `pip install -r requirements.txt`, starts FastAPI on Render’s `PORT`, checks `/health/ready`, and applies database migrations during application startup
 - No worker, persistent disk, or paid plan is used; jobs run in the API process with `JOB_BACKEND=memory`
 
-The free service has 512 MB RAM, sleeps after 15 minutes idle, and loses local model-cache files on restart. Render Free does not support pre-deploy commands, so `RUN_SCHEMA_ON_STARTUP=true` applies migrations when the service starts. Rebuild the creator index locally before deploying. The service uses `HF_HOME=/tmp/influencer-model-cache`, `MAX_MEMORY_JOBS=4`, and `MAX_MATCH_JOBS_PER_USER_PER_HOUR=3`.
+The free service has 512 MB RAM, sleeps after 15 minutes idle, and loses local model-cache files on restart. Render Free does not support pre-deploy commands, so `RUN_SCHEMA_ON_STARTUP=true` applies migrations when the service starts. Rebuild the creator index locally before deploying. The service uses `HF_HOME=/tmp/influencer-model-cache`, `MAX_MEMORY_JOBS=4`, `MAX_MATCH_JOBS_PER_USER_PER_HOUR=3`, and `MAX_MATCH_JOBS_PER_IP_PER_HOUR=12`.
 
 Required backend environment values are:
 
@@ -221,7 +225,7 @@ SUPABASE_JWT_SECRET=...
 CORS_ALLOWED_ORIGINS=https://<your-vercel-domain>
 ```
 
-`render.yaml` supplies the Python version, model, dimensions, queue limits, and ephemeral cache path. Set the secrets requested by the Blueprint. Viewers sign in with Supabase magic links; this keeps the server-side Gemini key from being exposed to anonymous visitors. `CORS_ALLOWED_ORIGINS` is needed by the API; do not put it in the frontend. Startup migrations require database DDL permission.
+`render.yaml` supplies the Python version, model, dimensions, queue limits, and ephemeral cache path. Set the secrets requested by the Blueprint. Visitors create an email/password account or sign in with Supabase Auth; this keeps the server-side Gemini key from being exposed to anonymous visitors. `CORS_ALLOWED_ORIGINS` is needed by the API; do not put it in the frontend. Startup migrations require database DDL permission.
 
 
 ### Vercel
@@ -242,4 +246,4 @@ VITE_SUPABASE_ANON_KEY=...
 VITE_DEMO_MODE=true
 ```
 
-Never place `GEMINI_API_KEY`, the Supabase service-role key, `SUPABASE_JWT_SECRET`, or `DATABASE_URL` in Vercel. The deployed application is a best-effort personal demo: Supabase Auth protects the server-side Gemini key, completed runs remain in PostgreSQL, and in-process jobs can be interrupted by Render sleeping or restarting.
+Never place `GEMINI_API_KEY`, the Supabase service-role key, `SUPABASE_JWT_SECRET`, or `DATABASE_URL` in Vercel. The deployed application is a best-effort personal demo: Supabase Auth protects the server-side Gemini key, completed runs remain in PostgreSQL, and in-process jobs can be interrupted by Render sleeping or restarting. Open account creation is rate-limited; add Supabase CAPTCHA or switch to invite-only signup if the public demo receives abuse.

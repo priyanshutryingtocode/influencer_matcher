@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from api.auth import current_user_id
 from api.jobs.manager import JobManager, JobQueueFullError, JobRateLimitError
 from api.jobs.postgres import PostgresJobManager
+from api.rate_limit import RateLimitExceeded, SlidingWindowRateLimiter
 from api.repositories.postgres_run_repository import InvalidCursor, PostgresRunRepository
 from api.schemas.models import (
     ComparisonRequest,
@@ -43,6 +44,11 @@ def create_app(
     indexed_count: int | None = None,
     job_backend: str | None = None,
 ) -> FastAPI:
+    ip_rate_limiter = SlidingWindowRateLimiter(
+        config.MAX_MATCH_JOBS_PER_IP_PER_HOUR,
+        window_seconds=3600,
+    )
+
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         if config.APP_ENV in {"demo", "production"}:
@@ -249,6 +255,14 @@ def create_app(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"code": "WORKER_UNAVAILABLE", "message": "The match worker is unavailable."},
             )
+        if config.APP_ENV == "demo":
+            try:
+                ip_rate_limiter.check(_client_ip(request))
+            except RateLimitExceeded as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={"code": "MATCH_IP_RATE_LIMIT", "message": "The demo match limit has been reached for this network."},
+                ) from exc
         if owner_id and request.app.state.durable_jobs and hasattr(manager, "recent_count"):
             recent = manager.recent_count(owner_id, timezone.utc.now() - timedelta(hours=1))
             if recent >= config.MAX_MATCH_JOBS_PER_USER_PER_HOUR:
@@ -409,6 +423,15 @@ def _warm_embedding_model() -> None:
         get_sentence_transformer()
     except Exception as exc:
         logger.warning("Embedding warmup failed: %s", type(exc).__name__)
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        candidate = forwarded.split(",")[-1].strip()
+        if candidate:
+            return candidate
+    return request.client.host if request.client else "unknown"
 
 
 def _repository(request: Request):

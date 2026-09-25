@@ -116,7 +116,12 @@ input[type="range"] { padding: 0; border: 0; background: transparent; accent-col
 .auth-page { display: grid; min-height: 100vh; place-items: center; padding: 2rem 1rem; }
 .auth-card { width: min(100%, 430px); padding: 2rem; border: 1px solid var(--rule); border-top: 2px solid var(--signal); background: var(--surface); }
 .auth-card h1 { margin: 0; color: var(--text); font-size: clamp(1.8rem, 5vw, 2.6rem); letter-spacing: -.045em; }
-.auth-form { display: grid; gap: 1rem; margin-top: 1.8rem; }
+.auth-mode-switch { display: grid; grid-template-columns: 1fr 1fr; margin-top: 1.6rem; border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
+.auth-mode-button { border: 0; border-right: 1px solid var(--rule); padding: .7rem .8rem; color: var(--muted); background: var(--surface-soft); cursor: pointer; font-size: .74rem; font-weight: 750; }
+.auth-mode-button:last-child { border-right: 0; }
+.auth-mode-button:hover { color: var(--text); }
+.auth-mode-button.active { color: var(--canvas); background: var(--signal); }
+.auth-form { display: grid; gap: 1rem; margin-top: 1.2rem; }
 .auth-form label { display: grid; gap: .45rem; color: var(--muted); font-size: .78rem; font-weight: 650; }
 .auth-form .primary-button { width: 100%; }
 .auth-message, .auth-error { margin: 0; font-size: .78rem; }

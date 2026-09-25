@@ -22,6 +22,8 @@ services:
         value: "4"
       - key: MAX_MATCH_JOBS_PER_USER_PER_HOUR
         value: "3"
+      - key: MAX_MATCH_JOBS_PER_IP_PER_HOUR
+        value: "12"
       - key: LOCAL_EMBED_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: EMBED_DIMENSIONS
