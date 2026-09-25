@@ -41,11 +41,12 @@ class JobManager:
         self._jobs: dict[UUID, dict] = {}
         self._client = None
 
-    def submit(self, brief: Brief, params: MatchParams) -> MatchJobResponse:
+    def submit(self, brief: Brief, params: MatchParams, owner_id: str | None = None) -> MatchJobResponse:
         job_id = uuid4()
         now = _now()
         state = {
             "job_id": job_id,
+            "owner_id": owner_id,
             "status": "queued",
             "stage": "queued",
             "progress": {},
@@ -60,13 +61,15 @@ class JobManager:
             if len(self._jobs) >= MAX_JOBS:
                 raise JobQueueFullError("The match queue is full.")
             self._jobs[job_id] = state
-        self._executor.submit(self._execute, job_id, brief, params)
+        self._executor.submit(self._execute, job_id, brief, params, owner_id)
         return self.get(job_id)
 
-    def get(self, job_id: UUID) -> MatchJobResponse | None:
+    def get(self, job_id: UUID, owner_id: str | None = None) -> MatchJobResponse | None:
         with self._lock:
             state = self._jobs.get(job_id)
-            return MatchJobResponse.model_validate(state.copy()) if state else None
+            if state is None or (owner_id is not None and state.get("owner_id") != owner_id):
+                return None
+            return MatchJobResponse.model_validate({key: value for key, value in state.items() if key != "owner_id"})
 
     def shutdown(self) -> None:
         with self._lock:
@@ -80,7 +83,7 @@ class JobManager:
                     )
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def _execute(self, job_id: UUID, brief: Brief, params: MatchParams) -> None:
+    def _execute(self, job_id: UUID, brief: Brief, params: MatchParams, owner_id: str | None) -> None:
         self._update(job_id, status="running", stage="embedding")
         try:
             result = self._matcher(job_id, brief, params)
@@ -99,6 +102,7 @@ class JobManager:
                 uuid4(),
                 indexed_count=self._indexed_count_provider(),
             )
+            record["owner_id"] = owner_id
             saved = self._repository.create(record)
             self._update(
                 job_id,

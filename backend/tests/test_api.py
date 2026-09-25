@@ -18,7 +18,7 @@ class MemoryRepository:
     def ensure_schema(self):
         return None
 
-    def create(self, record):
+    def create(self, record, owner_id=None):
         now = datetime.now(timezone.utc)
         saved = dict(record)
         saved["created_at"] = now
@@ -26,7 +26,7 @@ class MemoryRepository:
         self.records[saved["id"]] = saved
         return saved
 
-    def list(self, limit, cursor=None):
+    def list(self, limit, cursor=None, owner_id=None):
         records = sorted(
             self.records.values(),
             key=lambda item: (item["created_at"], item["id"]),
@@ -34,10 +34,10 @@ class MemoryRepository:
         )
         return records[:limit], None
 
-    def get(self, run_id):
+    def get(self, run_id, owner_id=None):
         return self.records.get(run_id)
 
-    def delete(self, run_id):
+    def delete(self, run_id, owner_id=None):
         return self.records.pop(run_id, None) is not None
 
 
@@ -45,7 +45,7 @@ class MemoryJobManager:
     def __init__(self):
         self.jobs = {}
 
-    def submit(self, brief, params):
+    def submit(self, brief, params, owner_id=None):
         job_id = uuid4()
         now = datetime.now(timezone.utc)
         job = MatchJobResponse(
@@ -58,7 +58,7 @@ class MemoryJobManager:
         self.jobs[job_id] = job
         return job
 
-    def get(self, job_id):
+    def get(self, job_id, owner_id=None):
         return self.jobs.get(job_id)
 
     def shutdown(self):

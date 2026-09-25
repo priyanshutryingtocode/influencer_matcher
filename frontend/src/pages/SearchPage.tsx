@@ -164,7 +164,7 @@ export function SearchPage() {
                     <h2>{run.brief.niche} <span>·</span> {run.brief.platform}</h2>
                     <p className="run-context-line">{run.brief.audience || "General audience"} <span>/</span> {run.brief.vibe || "Versatile tone"}</p>
                   </div>
-                  <a className="secondary-button" href={api.exportUrl(run.run_id)} download>Export CSV</a>
+                  <button className="secondary-button" type="button" onClick={() => void api.downloadRun(run.run_id).catch((caught) => setRunError(caught instanceof ApiError ? caught.message : "Could not export the run."))}>Export CSV</button>
                 </div>
                 <WarningBanner warnings={run.warnings} />
                 <SummaryMetrics summary={run.summary} />

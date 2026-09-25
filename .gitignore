@@ -8,3 +8,7 @@ venv/
 node_modules/
 frontend/dist/
 frontend/.vite/
+backend/model-cache/
+frontend/.env.local
+.env.example
+migrations

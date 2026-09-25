@@ -1,3 +1,4 @@
+import { supabase } from "../lib/supabase";
 import type {
   Brief,
   Comparison,
@@ -9,6 +10,8 @@ import type {
 } from "../types";
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+const isLocalHost = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+export const isApiConfigured = Boolean(baseUrl) || (import.meta.env.DEV && isLocalHost);
 
 export class ApiError extends Error {
   readonly status: number;
@@ -22,9 +25,21 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function authenticatedHeaders(init?: RequestInit) {
   const headers = new Headers(init?.headers);
   if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) headers.set("Authorization", `Bearer ${data.session.access_token}`);
+  }
+  return headers;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (import.meta.env.PROD && !isApiConfigured) {
+    throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
+  }
+  const headers = await authenticatedHeaders(init);
   const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
   const text = await response.text();
   let payload: unknown = null;
@@ -39,6 +54,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(errorMessage(payload), response.status, payload);
   }
   return payload as T;
+}
+
+async function downloadFile(path: string, filename: string) {
+  if (import.meta.env.PROD && !isApiConfigured) {
+    throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
+  }
+  const response = await fetch(`${baseUrl}${path}`, { headers: await authenticatedHeaders() });
+  if (!response.ok) {
+    const text = await response.text();
+    let payload: unknown = text;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+    throw new ApiError(errorMessage(payload), response.status, payload);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export const api = {
@@ -61,7 +100,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ run_id_a: runIdA, run_id_b: runIdB }),
     }),
-  exportUrl: (runId: string) => `${baseUrl}/api/v1/runs/${runId}/export.csv`,
+  downloadRun: (runId: string) => downloadFile(`/api/v1/runs/${runId}/export.csv`, `shortlist-${runId}.csv`),
 };
 
 function errorMessage(payload: unknown): string {

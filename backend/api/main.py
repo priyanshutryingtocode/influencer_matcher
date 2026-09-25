@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta, timezone
 import logging
 import os
 import threading
@@ -13,7 +14,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from api.auth import current_user_id
 from api.jobs.manager import JobManager, JobQueueFullError
+from api.jobs.postgres import PostgresJobManager
 from api.repositories.postgres_run_repository import InvalidCursor, PostgresRunRepository
 from api.schemas.models import (
     ComparisonRequest,
@@ -38,13 +41,21 @@ def create_app(
     job_manager=None,
     initialize_database: bool = True,
     indexed_count: int | None = None,
+    job_backend: str | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        if config.APP_ENV == "production":
+            _validate_production_configuration()
         repo = application.state.run_repository
         manager = application.state.job_manager
+        backend_name = (job_backend or config.JOB_BACKEND).lower()
+        durable_jobs = backend_name == "postgres"
+        if config.APP_ENV == "production" and not durable_jobs:
+            raise RuntimeError("Production requires JOB_BACKEND=postgres")
         application.state.db_ready = False
         application.state.database_available = False
+        application.state.durable_jobs = durable_jobs
         application.state.indexed_count = indexed_count or 0
         application.state.index_checked_at = 0.0
         application.state.startup_error = None
@@ -52,7 +63,12 @@ def create_app(
             repo = repo or PostgresRunRepository()
             application.state.run_repository = repo
             try:
-                application.state.indexed_count = await asyncio.to_thread(_initialize_database, repo)
+                if config.RUN_SCHEMA_ON_STARTUP:
+                    application.state.indexed_count = await asyncio.to_thread(_initialize_database, repo)
+                else:
+                    application.state.indexed_count = await asyncio.to_thread(_check_database)
+                if durable_jobs and hasattr(repo, "check_schema"):
+                    await asyncio.to_thread(repo.check_schema)
                 application.state.database_available = True
                 application.state.index_checked_at = time.monotonic()
                 application.state.db_ready = application.state.indexed_count > 0
@@ -64,12 +80,19 @@ def create_app(
             application.state.database_available = repo is not None
             application.state.db_ready = application.state.database_available and application.state.indexed_count > 0
         if manager is None and repo is not None:
-            manager = JobManager(
-                repo,
-                indexed_count_provider=lambda: application.state.indexed_count,
-            )
+            if durable_jobs:
+                manager = PostgresJobManager(
+                    connection_factory=getattr(repo, "_connection_factory", None),
+                )
+                if config.RUN_SCHEMA_ON_STARTUP:
+                    manager.ensure_schema()
+            else:
+                manager = JobManager(
+                    repo,
+                    indexed_count_provider=lambda: application.state.indexed_count,
+                )
             application.state.job_manager = manager
-        if initialize_database:
+        if initialize_database and not durable_jobs:
             threading.Thread(target=_warm_embedding_model, name="embedding-warmup", daemon=True).start()
         yield
         if manager is not None:
@@ -88,6 +111,7 @@ def create_app(
     application.state.index_checked_at = 0.0
     application.state.startup_error = None
     application.state.uses_database = initialize_database
+    application.state.durable_jobs = (job_backend or config.JOB_BACKEND).lower() == "postgres"
 
     origins = [
         origin.strip()
@@ -200,6 +224,12 @@ def create_app(
     )
     def create_match_job(payload: MatchJobRequest, request: Request):
         _validate_brief(payload.brief.niche, payload.brief.platform)
+        owner_id = current_user_id(request)
+        if request.app.state.durable_jobs and not owner_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "AUTH_REQUIRED", "message": "Sign in before running a match."},
+            )
         _refresh_index_state(request)
         if not request.app.state.database_available:
             raise HTTPException(
@@ -217,8 +247,18 @@ def create_app(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"code": "WORKER_UNAVAILABLE", "message": "The match worker is unavailable."},
             )
+        if owner_id and request.app.state.durable_jobs and hasattr(manager, "recent_count"):
+            recent = manager.recent_count(owner_id, timezone.utc.now() - timedelta(hours=1))
+            if recent >= config.MAX_MATCH_JOBS_PER_USER_PER_HOUR:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={"code": "MATCH_RATE_LIMIT", "message": "The hourly match limit has been reached."},
+                )
         try:
-            return manager.submit(payload.brief.to_domain(), payload.params)
+            brief = payload.brief.to_domain()
+            if owner_id is None:
+                return manager.submit(brief, payload.params)
+            return manager.submit(brief, payload.params, owner_id=owner_id)
         except JobQueueFullError as exc:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -227,7 +267,12 @@ def create_app(
 
     @application.get("/api/v1/match-jobs/{job_id}", response_model=MatchJobResponse)
     def get_match_job(job_id: UUID, request: Request):
-        job = request.app.state.job_manager.get(job_id) if request.app.state.job_manager else None
+        owner_id = current_user_id(request)
+        manager = request.app.state.job_manager
+        if owner_id is None:
+            job = manager.get(job_id) if manager else None
+        else:
+            job = manager.get(job_id, owner_id=owner_id) if manager else None
         if job is None:
             raise _not_found("MATCH_JOB_NOT_FOUND", "Match job not found.")
         return job
@@ -238,8 +283,13 @@ def create_app(
         limit: int = Query(default=20, ge=1, le=100),
         cursor: str | None = None,
     ):
+        owner_id = current_user_id(request)
         try:
-            records, next_cursor = _repository(request).list(limit=limit, cursor=cursor)
+            repository = _repository(request)
+            if owner_id is None:
+                records, next_cursor = repository.list(limit=limit, cursor=cursor)
+            else:
+                records, next_cursor = repository.list(limit=limit, cursor=cursor, owner_id=owner_id)
         except InvalidCursor as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -252,7 +302,9 @@ def create_app(
 
     @application.get("/api/v1/runs/{run_id}/export.csv")
     def export_run(run_id: UUID, request: Request):
-        record = _repository(request).get(run_id)
+        owner_id = current_user_id(request)
+        repository = _repository(request)
+        record = repository.get(run_id) if owner_id is None else repository.get(run_id, owner_id=owner_id)
         if record is None:
             raise _not_found("RUN_NOT_FOUND", "Run not found.")
         return Response(
@@ -263,27 +315,51 @@ def create_app(
 
     @application.get("/api/v1/runs/{run_id}", response_model=RunDetail)
     def get_run(run_id: UUID, request: Request):
-        record = _repository(request).get(run_id)
+        owner_id = current_user_id(request)
+        repository = _repository(request)
+        record = repository.get(run_id) if owner_id is None else repository.get(run_id, owner_id=owner_id)
         if record is None:
             raise _not_found("RUN_NOT_FOUND", "Run not found.")
         return run_detail(record)
 
     @application.delete("/api/v1/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_run(run_id: UUID, request: Request):
-        if not _repository(request).delete(run_id):
+        owner_id = current_user_id(request)
+        repository = _repository(request)
+        deleted = repository.delete(run_id) if owner_id is None else repository.delete(run_id, owner_id=owner_id)
+        if not deleted:
             raise _not_found("RUN_NOT_FOUND", "Run not found.")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @application.post("/api/v1/comparisons", response_model=ComparisonResponse)
     def compare(payload: ComparisonRequest, request: Request):
+        owner_id = current_user_id(request)
         repository = _repository(request)
-        run_a = repository.get(payload.run_id_a)
-        run_b = repository.get(payload.run_id_b)
+        run_a = repository.get(payload.run_id_a) if owner_id is None else repository.get(payload.run_id_a, owner_id=owner_id)
+        run_b = repository.get(payload.run_id_b) if owner_id is None else repository.get(payload.run_id_b, owner_id=owner_id)
         if run_a is None or run_b is None:
             raise _not_found("RUN_NOT_FOUND", "One or both runs were not found.")
         return compare_runs(run_a, run_b)
 
     return application
+
+
+def _validate_production_configuration() -> None:
+    missing = []
+    if not config.AUTH_REQUIRED:
+        missing.append("AUTH_REQUIRED=true")
+    if not config.DATABASE_URL:
+        missing.append("DATABASE_URL")
+    if not config.GEMINI_API_KEY:
+        missing.append("GEMINI_API_KEY")
+    if not config.SUPABASE_URL:
+        missing.append("SUPABASE_URL")
+    if not (config.SUPABASE_JWT_SECRET or config.SUPABASE_JWKS_URL):
+        missing.append("SUPABASE_JWT_SECRET or SUPABASE_JWKS_URL")
+    if not os.environ.get("CORS_ALLOWED_ORIGINS", "").strip():
+        missing.append("CORS_ALLOWED_ORIGINS")
+    if missing:
+        raise RuntimeError("Production configuration is missing: " + ", ".join(missing))
 
 
 def _initialize_database(repository) -> int:
@@ -292,6 +368,11 @@ def _initialize_database(repository) -> int:
         count = vector_store.count_influencers(conn)
     repository.ensure_schema()
     return count
+
+
+def _check_database() -> int:
+    with vector_store.get_connection() as conn:
+        return vector_store.count_influencers(conn)
 
 
 def _refresh_index_state(request: Request) -> None:

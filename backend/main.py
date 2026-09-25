@@ -63,6 +63,7 @@ def parse_args() -> argparse.Namespace:
         default=config.DEFAULT_TOP_N_RANKED, help="Final shortlist size",
     )
     parser.add_argument("--reindex", action="store_true", help="Clear and regenerate/re-embed the database even if already populated")
+    parser.add_argument("--index-only", action="store_true", help="Initialize or populate the creator index without running a sample match")
     args = parser.parse_args()
 
     if args.top_n > args.top_k:
@@ -106,6 +107,8 @@ def main() -> None:
         vector_store.init_schema(conn)
 
     ensure_indexed(args)
+    if args.index_only:
+        return
 
     brief = Brief(
         niche=args.niche,

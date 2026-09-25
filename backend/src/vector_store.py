@@ -117,6 +117,8 @@ CREATE INDEX IF NOT EXISTS {table}_embedding_idx
 --   replace this comment with the measured numbers.
 
 CREATE INDEX IF NOT EXISTS {table}_platform_idx ON {table} (platform);
+
+ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
 """
 
 

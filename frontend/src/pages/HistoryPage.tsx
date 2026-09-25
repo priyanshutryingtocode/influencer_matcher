@@ -82,7 +82,7 @@ export function HistoryPage() {
                   <h2>{selected.brief.niche} <span>·</span> {selected.brief.platform}</h2>
                   <p className="run-context-line">{selected.brief.audience || "General audience"} <span>/</span> {selected.brief.vibe || "Versatile tone"}</p>
                 </div>
-                <a className="secondary-button" href={api.exportUrl(selected.run_id)} download>Export CSV</a>
+                <button className="secondary-button" type="button" onClick={() => void api.downloadRun(selected.run_id).catch((caught) => setDetailError(caught instanceof ApiError ? caught.message : "Could not export the run."))}>Export CSV</button>
               </div>
               <WarningBanner warnings={selected.warnings} />
               <SummaryMetrics summary={selected.summary} compact />

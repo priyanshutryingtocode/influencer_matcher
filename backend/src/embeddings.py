@@ -6,7 +6,6 @@ import threading
 from collections import OrderedDict
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 from . import config
 from .models import Influencer

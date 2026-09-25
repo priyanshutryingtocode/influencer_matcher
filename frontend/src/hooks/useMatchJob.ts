@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import type { Brief, MatchJob, MatchParams } from "../types";
 
 const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
+const maxPollDurationMs = 15 * 60 * 1000;
 
 export function useMatchJob() {
   const [job, setJob] = useState<MatchJob | null>(null);
@@ -22,11 +23,15 @@ export function useMatchJob() {
     const sequence = ++sequenceRef.current;
     setError(null);
     setJob(null);
+    const startedAt = Date.now();
     try {
       let current = await api.createMatchJob(brief, params);
       if (!mountedRef.current || sequence !== sequenceRef.current) return;
       setJob(current);
       while (!terminalStatuses.has(current.status)) {
+        if (Date.now() - startedAt > maxPollDurationMs) {
+          throw new Error("The match is taking too long. Please try again shortly.");
+        }
         await wait(1200);
         current = await api.getMatchJob(current.job_id);
         if (!mountedRef.current || sequence !== sequenceRef.current) return;
