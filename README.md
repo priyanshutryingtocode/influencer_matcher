@@ -202,10 +202,10 @@ The API supports either Supabase legacy `HS256` tokens (`SUPABASE_JWT_SECRET`) o
 
 `render.yaml` defines one free native Python web service with `rootDir: backend` and Python `3.12.11`:
 
-- `influencer-matcher-api`: builds with `pip install -r requirements.txt`, starts FastAPI on Render’s `PORT`, checks `/health/ready`, and runs `python -m api.migrate` before each deploy
+- `influencer-matcher-api`: builds with `pip install -r requirements.txt`, starts FastAPI on Render’s `PORT`, checks `/health/ready`, and applies database migrations during application startup
 - No worker, persistent disk, or paid plan is used; jobs run in the API process with `JOB_BACKEND=memory`
 
-The free service has 512 MB RAM, sleeps after 15 minutes idle, and loses local model-cache files on restart. Rebuild the creator index locally before deploying. The service uses `HF_HOME=/tmp/influencer-model-cache`, `MAX_MEMORY_JOBS=4`, and `MAX_MATCH_JOBS_PER_USER_PER_HOUR=3`.
+The free service has 512 MB RAM, sleeps after 15 minutes idle, and loses local model-cache files on restart. Render Free does not support pre-deploy commands, so `RUN_SCHEMA_ON_STARTUP=true` applies migrations when the service starts. Rebuild the creator index locally before deploying. The service uses `HF_HOME=/tmp/influencer-model-cache`, `MAX_MEMORY_JOBS=4`, and `MAX_MATCH_JOBS_PER_USER_PER_HOUR=3`.
 
 Required backend environment values are:
 
@@ -221,7 +221,7 @@ SUPABASE_JWT_SECRET=...
 CORS_ALLOWED_ORIGINS=https://<your-vercel-domain>
 ```
 
-`render.yaml` supplies the Python version, model, dimensions, queue limits, and ephemeral cache path. Set the secrets requested by the Blueprint. Viewers sign in with Supabase magic links; this keeps the server-side Gemini key from being exposed to anonymous visitors. `CORS_ALLOWED_ORIGINS` is needed by the API; do not put it in the frontend. The pre-deploy migration requires database DDL permission.
+`render.yaml` supplies the Python version, model, dimensions, queue limits, and ephemeral cache path. Set the secrets requested by the Blueprint. Viewers sign in with Supabase magic links; this keeps the server-side Gemini key from being exposed to anonymous visitors. `CORS_ALLOWED_ORIGINS` is needed by the API; do not put it in the frontend. Startup migrations require database DDL permission.
 
 
 ### Vercel
