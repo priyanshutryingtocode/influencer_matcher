@@ -50,6 +50,8 @@ button { color: inherit; }
 .nav-index { color: var(--signal-dim); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .65rem; font-weight: 500; }
 .auth-signout { max-width: 180px; overflow: hidden; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .auth-signout:hover { color: var(--text); }
+.demo-banner { display: flex; align-items: baseline; justify-content: center; gap: .6rem; padding: .65rem var(--page-gutter); border-bottom: 1px solid var(--rule); color: var(--muted); background: var(--surface-soft); font-size: .72rem; }
+.demo-banner strong { color: var(--signal); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
 .page-content { width: min(var(--content-width), calc(100% - var(--page-gutter) - var(--page-gutter))); margin: 0 auto; padding: 2.5rem 0 5rem; }
 .page-section { display: grid; gap: 2rem; }
 .page-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--rule); }
@@ -289,6 +291,7 @@ details ul { margin: .45rem 0; padding-left: 1rem; }
 
 @media (max-width: 760px) {
   :root { --page-gutter: 1rem; }
+  .demo-banner { align-items: flex-start; flex-direction: column; gap: .25rem; }
   .topbar { align-items: flex-start; flex-direction: column; gap: .8rem; padding-top: .8rem; padding-bottom: 0; }
   .topbar-actions { width: 100%; justify-content: space-between; }
   .main-nav { width: 100%; min-height: 42px; gap: 1rem; }

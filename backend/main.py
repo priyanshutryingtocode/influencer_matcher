@@ -9,6 +9,7 @@ Usage:
 
 import argparse
 
+from api.repositories.postgres_run_repository import PostgresRunRepository
 from src import config, vector_store
 from src.data_generator import NICHES, PLATFORMS, generate_influencers, generate_balanced_influencers
 from src.embeddings import index_influencers
@@ -103,6 +104,7 @@ def ensure_indexed(args) -> None:
 def main() -> None:
     args = parse_args()
 
+    PostgresRunRepository().ensure_schema()
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
 

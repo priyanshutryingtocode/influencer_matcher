@@ -30,6 +30,12 @@ export function Layout() {
           {isConfigured && user && <button className="auth-signout" type="button" onClick={() => void signOut()}>{user.email ?? "Sign out"}</button>}
         </div>
       </header>
+      {import.meta.env.VITE_DEMO_MODE === "true" && (
+        <div className="demo-banner" role="status">
+          <strong>Personal project demo</strong>
+          <span>Free-tier hosting may sleep between visits; completed runs remain saved.</span>
+        </div>
+      )}
       <main id="main-content" className="page-content">
         <Outlet />
       </main>

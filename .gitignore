@@ -11,4 +11,3 @@ frontend/.vite/
 backend/model-cache/
 frontend/.env.local
 .env.example
-migrations

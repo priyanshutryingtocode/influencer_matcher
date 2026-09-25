@@ -21,8 +21,27 @@ class PostgresRunRepository:
     def ensure_schema(self) -> None:
         migration_dir = Path(__file__).resolve().parents[2] / "migrations"
         with self._connection_factory() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    filename TEXT PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
             for migration in sorted(migration_dir.glob("*.sql")):
-                conn.execute(migration.read_text(encoding="utf-8"))
+                already_applied = conn.execute(
+                    "SELECT 1 FROM schema_migrations WHERE filename = %s",
+                    (migration.name,),
+                ).fetchone()
+                if already_applied:
+                    continue
+                with conn.transaction():
+                    conn.execute(migration.read_text(encoding="utf-8"))
+                    conn.execute(
+                        "INSERT INTO schema_migrations (filename) VALUES (%s)",
+                        (migration.name,),
+                    )
 
     def check_schema(self) -> None:
         with self._connection_factory() as conn:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import RLock
 from typing import Callable
 from uuid import UUID, uuid4
@@ -23,6 +23,10 @@ class JobQueueFullError(RuntimeError):
     pass
 
 
+class JobRateLimitError(RuntimeError):
+    pass
+
+
 class JobManager:
     def __init__(
         self,
@@ -31,11 +35,15 @@ class JobManager:
         client_factory: Callable | None = None,
         indexed_count_provider: Callable[[], int | None] | None = None,
         max_workers: int = 1,
+        max_jobs: int = MAX_JOBS,
+        max_jobs_per_owner_per_hour: int | None = None,
     ):
         self._repository = repository
         self._matcher = matcher or self._default_match
         self._client_factory = client_factory or get_client
         self._indexed_count_provider = indexed_count_provider or (lambda: None)
+        self._max_jobs = max_jobs
+        self._max_jobs_per_owner_per_hour = max_jobs_per_owner_per_hour
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="match-job")
         self._lock = RLock()
         self._jobs: dict[UUID, dict] = {}
@@ -58,7 +66,16 @@ class JobManager:
         }
         with self._lock:
             self._prune_locked()
-            if len(self._jobs) >= MAX_JOBS:
+            if owner_id and self._max_jobs_per_owner_per_hour is not None:
+                cutoff = now - timedelta(hours=1)
+                recent = sum(
+                    1
+                    for existing in self._jobs.values()
+                    if existing.get("owner_id") == owner_id and existing["created_at"] >= cutoff
+                )
+                if recent >= self._max_jobs_per_owner_per_hour:
+                    raise JobRateLimitError("The hourly match limit has been reached.")
+            if len(self._jobs) >= self._max_jobs:
                 raise JobQueueFullError("The match queue is full.")
             self._jobs[job_id] = state
         self._executor.submit(self._execute, job_id, brief, params, owner_id)
@@ -143,7 +160,7 @@ class JobManager:
 
     def _prune_locked(self) -> None:
         for job_id, state in list(self._jobs.items()):
-            if len(self._jobs) < MAX_JOBS:
+            if len(self._jobs) < self._max_jobs:
                 break
             if state["status"] in TERMINAL_STATUSES:
                 self._jobs.pop(job_id, None)

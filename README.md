@@ -4,7 +4,7 @@ A RAG pipeline that matches brand briefs to influencer profiles using PostgreSQL
 
 ## Features
 
-- Local `intfloat/e5-base-v2` embeddings with 768-dimensional vectors
+- Local `sentence-transformers/all-MiniLM-L6-v2` embeddings with 384-dimensional vectors
 - Platform hard filtering plus semantic niche, audience, and vibe matching
 - Gemini structured ranking with fit validation and retrieval-order fallbacks
 - FastAPI backend with asynchronous match jobs
@@ -58,12 +58,7 @@ influencer_matcher/
    venv/Scripts/python -m pip install -r backend/requirements.txt
    ```
 
-3. Create `.env` in the repository root:
-
-   ```text
-   GEMINI_API_KEY=your-key
-   DATABASE_URL=postgresql://user:password@host:5432/database
-   ```
+3. Copy `.env.example` to `.env` and fill the backend values. For local development keep `APP_ENV=development`, `AUTH_REQUIRED=false`, and `JOB_BACKEND=memory`; the Render demo overrides these with `APP_ENV=demo` and authentication enabled.
 
 4. Install frontend dependencies:
 
@@ -118,7 +113,7 @@ API endpoints include:
 - `GET /api/v1/runs/{run_id}/export.csv`
 - `POST /api/v1/comparisons`
 
-Local development uses a bounded in-process job manager. Production requires `JOB_BACKEND=postgres`: the API writes jobs to PostgreSQL and the separate Render worker claims them with a database lease. Completed jobs and results are durable, and abandoned running jobs are requeued after `STALE_JOB_AFTER_SECONDS`.
+Local development and the free demo use a bounded in-process job manager. Completed runs are persisted in PostgreSQL, but queued or running jobs can be lost when a free Render service sleeps, restarts, or redeploys. The optional paid configuration can use the separate PostgreSQL worker.
 
 ## Run the React frontend
 
@@ -127,7 +122,7 @@ cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`. The frontend uses the Vite proxy for local API calls. Set `VITE_API_BASE_URL` for a hosted API; production builds fail closed when it is missing.
+Open `http://localhost:5173`. The frontend uses the Vite proxy for local API calls. Set `VITE_API_BASE_URL` for a hosted API; production builds fail closed when it is missing. For local Vite variables, use `frontend/.env.local`; Render and Vercel variables are configured in their dashboards.
 
 The old local `.runs/` files are not imported into the new PostgreSQL history store.
 
@@ -165,6 +160,7 @@ Important settings are in `backend/src/config.py` and `.env`:
 
 - `LOCAL_EMBED_MODEL`
 - `EMBED_DIMENSIONS`
+- `EMBED_QUERY_PREFIX` and `EMBED_PASSAGE_PREFIX`
 - `GEN_MODEL`
 - `GEMINI_API_KEY`
 - `DATABASE_URL`
@@ -175,6 +171,7 @@ Important settings are in `backend/src/config.py` and `.env`:
 - `SUPABASE_JWT_AUDIENCE`
 - `JOB_BACKEND`
 - `RUN_SCHEMA_ON_STARTUP`
+- `MAX_MEMORY_JOBS`
 - `MAX_MATCH_JOBS_PER_USER_PER_HOUR`
 - `STALE_JOB_AFTER_SECONDS`
 
@@ -182,41 +179,41 @@ Changing the embedding model or vector width requires reindexing. Run history st
 
 ## Deployment
 
-The production topology is Render for the API and worker, Vercel for the React frontend, and Supabase for Auth/PostgreSQL. The root `.env` is ignored by Git; keep credentials out of source control and rotate any credential that has been shared.
+The deployment topology is Render for the API, Vercel for the React frontend, and Supabase for Auth/PostgreSQL. The root `.env` is ignored by Git; keep credentials out of source control and rotate any credential that has been shared.
 
 ### Supabase
 
 1. Enable the `vector` extension.
 2. Enable Supabase Auth and configure the production email provider.
 3. Add the Vercel site URL and local development URL to the Supabase Auth redirect allowlist. The magic-link flow returns to the current frontend origin.
-4. Create and index the creator table once, then apply all migrations in order. The Render API pre-deploy command performs the same bootstrap safely: `main.py --index-only` populates an empty index and skips work when data already exists.
+4. Rebuild the approved synthetic creator index with the lightweight embedding model. Run migrations first so the vector dimension is corrected before indexing:
 
 ```bash
 cd backend
-../venv/Scripts/python main.py --index-only --balanced
 ../venv/Scripts/python -m api.migrate
+../venv/Scripts/python main.py --index-only --balanced
 ```
 
-`api.migrate` applies `001` through `003` in lexical order. Migration `003` enables RLS and revokes direct `anon`/`authenticated` table access; the Render API and worker must use a direct server-side PostgreSQL connection using a table-owner or `BYPASSRLS` role with permission to read and write the app tables. Never use the browser Supabase URL or anon key as `DATABASE_URL`.
+`api.migrate` applies the numbered migrations in lexical order. Migration `004` recreates the creator embedding column as `vector(384)` and clears the old synthetic rows; `main.py --index-only` then repopulates them. The API uses a direct server-side PostgreSQL connection with table-owner or `BYPASSRLS` permissions. Never use the browser Supabase URL or anon key as `DATABASE_URL`.
 
 The API supports either Supabase legacy `HS256` tokens (`SUPABASE_JWT_SECRET`) or asymmetric tokens (`SUPABASE_JWKS_URL`). Set `SUPABASE_ISSUER` only when it differs from `<SUPABASE_URL>/auth/v1`; `SUPABASE_JWT_AUDIENCE` defaults to `authenticated`.
 
 ### Render
 
-`render.yaml` defines two native Python services with `rootDir: backend` and Python `3.12.11`:
+`render.yaml` defines one free native Python web service with `rootDir: backend` and Python `3.12.11`:
 
-- `influencer-matcher-api`: builds with `pip install -r requirements.txt`, starts FastAPI on Render’s `PORT`, checks `/health/ready`, and runs `python main.py --index-only --balanced && python -m api.migrate` before each deploy
-- `influencer-matcher-worker`: builds with `pip install -r requirements.txt`, starts `python -m worker`, and uses a 5 GB persistent disk at `/opt/render/project/src/model-cache`
+- `influencer-matcher-api`: builds with `pip install -r requirements.txt`, starts FastAPI on Render’s `PORT`, checks `/health/ready`, and runs `python -m api.migrate` before each deploy
+- No worker, persistent disk, or paid plan is used; jobs run in the API process with `JOB_BACKEND=memory`
 
-Create a Render Blueprint from the repository, then provide the secret values requested by the manifest. The worker disk keeps the local SentenceTransformer model cache across restarts. Both services use a `1c-2g` plan: the API needs headroom for its first-deploy index bootstrap, and the worker needs it for embeddings and ranking.
+The free service has 512 MB RAM, sleeps after 15 minutes idle, and loses local model-cache files on restart. Rebuild the creator index locally before deploying. The service uses `HF_HOME=/tmp/influencer-model-cache`, `MAX_MEMORY_JOBS=4`, and `MAX_MATCH_JOBS_PER_USER_PER_HOUR=3`.
 
-Required backend environment values for the API are shown below; repeat the database, Gemini, and Supabase values on the worker as well:
+Required backend environment values are:
 
 ```text
-APP_ENV=production
+APP_ENV=demo
 AUTH_REQUIRED=true
-JOB_BACKEND=postgres
-RUN_SCHEMA_ON_STARTUP=false
+JOB_BACKEND=memory
+RUN_SCHEMA_ON_STARTUP=true
 DATABASE_URL=...
 GEMINI_API_KEY=...
 SUPABASE_URL=...
@@ -224,7 +221,8 @@ SUPABASE_JWT_SECRET=...
 CORS_ALLOWED_ORIGINS=https://<your-vercel-domain>
 ```
 
-Set `SUPABASE_JWT_SECRET` for legacy HS256 tokens. For asymmetric tokens, the standard JWKS URL is derived from `SUPABASE_URL`; set `SUPABASE_JWKS_URL` only when a custom URL is required. `CORS_ALLOWED_ORIGINS` is needed by the API; do not put it in the frontend. The API pre-deploy migration requires the database credentials and should be allowed to run DDL.
+`render.yaml` supplies the Python version, model, dimensions, queue limits, and ephemeral cache path. Set the secrets requested by the Blueprint. Viewers sign in with Supabase magic links; this keeps the server-side Gemini key from being exposed to anonymous visitors. `CORS_ALLOWED_ORIGINS` is needed by the API; do not put it in the frontend. The pre-deploy migration requires database DDL permission.
+
 
 ### Vercel
 
@@ -241,6 +239,7 @@ Set these Vercel variables:
 VITE_API_BASE_URL=https://<your-render-api>.onrender.com
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
+VITE_DEMO_MODE=true
 ```
 
-Never place `GEMINI_API_KEY`, the Supabase service-role key, `SUPABASE_JWT_SECRET`, or `DATABASE_URL` in Vercel. The deployed application is multi-user: Supabase Auth, owner-scoped queries, the hourly job quota, and the separate worker are required. Add monitoring, retention controls, and a formal CI/deployment review before exposing it broadly.
+Never place `GEMINI_API_KEY`, the Supabase service-role key, `SUPABASE_JWT_SECRET`, or `DATABASE_URL` in Vercel. The deployed application is a best-effort personal demo: Supabase Auth protects the server-side Gemini key, completed runs remain in PostgreSQL, and in-process jobs can be interrupted by Render sleeping or restarting.

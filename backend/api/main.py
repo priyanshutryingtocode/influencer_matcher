@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.auth import current_user_id
-from api.jobs.manager import JobManager, JobQueueFullError
+from api.jobs.manager import JobManager, JobQueueFullError, JobRateLimitError
 from api.jobs.postgres import PostgresJobManager
 from api.repositories.postgres_run_repository import InvalidCursor, PostgresRunRepository
 from api.schemas.models import (
@@ -45,8 +45,8 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        if config.APP_ENV == "production":
-            _validate_production_configuration()
+        if config.APP_ENV in {"demo", "production"}:
+            _validate_public_configuration()
         repo = application.state.run_repository
         manager = application.state.job_manager
         backend_name = (job_backend or config.JOB_BACKEND).lower()
@@ -90,9 +90,11 @@ def create_app(
                 manager = JobManager(
                     repo,
                     indexed_count_provider=lambda: application.state.indexed_count,
+                    max_jobs=config.MAX_MEMORY_JOBS,
+                    max_jobs_per_owner_per_hour=config.MAX_MATCH_JOBS_PER_USER_PER_HOUR,
                 )
             application.state.job_manager = manager
-        if initialize_database and not durable_jobs:
+        if initialize_database and not durable_jobs and config.APP_ENV != "demo":
             threading.Thread(target=_warm_embedding_model, name="embedding-warmup", daemon=True).start()
         yield
         if manager is not None:
@@ -225,7 +227,7 @@ def create_app(
     def create_match_job(payload: MatchJobRequest, request: Request):
         _validate_brief(payload.brief.niche, payload.brief.platform)
         owner_id = current_user_id(request)
-        if request.app.state.durable_jobs and not owner_id:
+        if config.AUTH_REQUIRED and not owner_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"code": "AUTH_REQUIRED", "message": "Sign in before running a match."},
@@ -259,6 +261,11 @@ def create_app(
             if owner_id is None:
                 return manager.submit(brief, payload.params)
             return manager.submit(brief, payload.params, owner_id=owner_id)
+        except JobRateLimitError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "MATCH_RATE_LIMIT", "message": "The hourly match limit has been reached."},
+            ) from exc
         except JobQueueFullError as exc:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -344,7 +351,7 @@ def create_app(
     return application
 
 
-def _validate_production_configuration() -> None:
+def _validate_public_configuration() -> None:
     missing = []
     if not config.AUTH_REQUIRED:
         missing.append("AUTH_REQUIRED=true")
@@ -359,15 +366,14 @@ def _validate_production_configuration() -> None:
     if not os.environ.get("CORS_ALLOWED_ORIGINS", "").strip():
         missing.append("CORS_ALLOWED_ORIGINS")
     if missing:
-        raise RuntimeError("Production configuration is missing: " + ", ".join(missing))
+        raise RuntimeError("Public deployment configuration is missing: " + ", ".join(missing))
 
 
 def _initialize_database(repository) -> int:
+    repository.ensure_schema()
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
-        count = vector_store.count_influencers(conn)
-    repository.ensure_schema()
-    return count
+        return vector_store.count_influencers(conn)
 
 
 def _check_database() -> int:

@@ -3,24 +3,32 @@ services:
     name: influencer-matcher-api
     runtime: python
     rootDir: backend
-    plan: 1c-2g
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-10000}
-    preDeployCommand: python main.py --index-only --balanced && python -m api.migrate
+    preDeployCommand: python -m api.migrate
     healthCheckPath: /health/ready
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.11"
       - key: APP_ENV
-        value: production
+        value: demo
       - key: AUTH_REQUIRED
         value: "true"
       - key: JOB_BACKEND
-        value: postgres
+        value: memory
       - key: RUN_SCHEMA_ON_STARTUP
-        value: "false"
+        value: "true"
+      - key: MAX_MEMORY_JOBS
+        value: "4"
+      - key: MAX_MATCH_JOBS_PER_USER_PER_HOUR
+        value: "3"
+      - key: LOCAL_EMBED_MODEL
+        value: sentence-transformers/all-MiniLM-L6-v2
+      - key: EMBED_DIMENSIONS
+        value: "384"
       - key: HF_HOME
-        value: /opt/render/project/src/model-cache
+        value: /tmp/influencer-model-cache
       - key: DATABASE_URL
         sync: false
       - key: GEMINI_API_KEY
@@ -30,37 +38,4 @@ services:
       - key: SUPABASE_JWT_SECRET
         sync: false
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
-
-  - type: worker
-    name: influencer-matcher-worker
-    runtime: python
-    rootDir: backend
-    plan: 1c-2g
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m worker
-    disk:
-      name: model-cache
-      mountPath: /opt/render/project/src/model-cache
-      sizeGB: 5
-    envVars:
-      - key: PYTHON_VERSION
-        value: "3.12.11"
-      - key: APP_ENV
-        value: production
-      - key: AUTH_REQUIRED
-        value: "true"
-      - key: JOB_BACKEND
-        value: postgres
-      - key: RUN_SCHEMA_ON_STARTUP
-        value: "false"
-      - key: HF_HOME
-        value: /opt/render/project/src/model-cache
-      - key: DATABASE_URL
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_JWT_SECRET
         sync: false

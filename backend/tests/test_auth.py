@@ -92,3 +92,30 @@ def test_production_requires_security_configuration(monkeypatch):
     with pytest.raises(RuntimeError, match="AUTH_REQUIRED"):
         with TestClient(app):
             pass
+
+
+def test_demo_configuration_allows_memory_jobs(monkeypatch):
+    monkeypatch.setattr(config, "APP_ENV", "demo")
+    monkeypatch.setattr(config, "AUTH_REQUIRED", True)
+    monkeypatch.setattr(config, "DATABASE_URL", "postgresql://demo")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "demo-key")
+    monkeypatch.setattr(config, "SUPABASE_URL", "https://demo.supabase.co")
+    monkeypatch.setattr(config, "SUPABASE_JWT_SECRET", "test-secret-that-is-at-least-32-bytes")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://demo.vercel.app")
+    app = create_app(
+        repository=AuthRepository(),
+        job_manager=AuthJobManager(),
+        initialize_database=False,
+        indexed_count=10,
+        job_backend="memory",
+    )
+    with TestClient(app) as client:
+        assert client.get("/health/live").status_code == 200
+        response = client.post(
+            "/api/v1/match-jobs",
+            json={
+                "brief": {"niche": "Fitness", "platform": "Any", "audience": "Gen Z", "vibe": "warm"},
+                "params": {"top_k": 3, "top_n": 1},
+            },
+        )
+        assert response.status_code == 401

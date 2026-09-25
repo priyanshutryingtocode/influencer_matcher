@@ -22,6 +22,7 @@ from pathlib import Path
 from statistics import mean
 from time import perf_counter
 
+from api.repositories.postgres_run_repository import PostgresRunRepository
 from src import config, vector_store
 from src.embeddings import embed_texts, get_cached_query_vector
 from src.gemini_client import get_client
@@ -130,6 +131,7 @@ def main() -> None:
     client = get_client()
     case_results: list[dict | None] = [None] * len(cases)
 
+    PostgresRunRepository().ensure_schema()
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
         if not vector_store.count_influencers(conn):

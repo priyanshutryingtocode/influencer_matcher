@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from api.jobs.manager import JobQueueFullError, JobManager, MAX_JOBS
+from api.jobs.manager import JobQueueFullError, JobManager, JobRateLimitError, MAX_JOBS
 from api.schemas.models import MatchParams
 from src.models import Brief
 
@@ -31,4 +31,19 @@ def test_job_queue_rejects_work_when_all_jobs_are_live():
     with pytest.raises(JobQueueFullError):
         manager.submit(brief, params)
     release.set()
+    manager.shutdown()
+
+
+def test_job_manager_enforces_per_owner_rate_limit():
+    manager = JobManager(
+        EmptyRepository(),
+        matcher=lambda job_id, brief, params: None,
+        max_jobs=4,
+        max_jobs_per_owner_per_hour=1,
+    )
+    brief = Brief(niche="Fitness", platform="Any")
+    params = MatchParams(top_k=3, top_n=1)
+    manager.submit(brief, params, owner_id="owner-1")
+    with pytest.raises(JobRateLimitError):
+        manager.submit(brief, params, owner_id="owner-1")
     manager.shutdown()
