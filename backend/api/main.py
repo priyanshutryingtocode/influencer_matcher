@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta, timezone
 import logging
 import os
-import threading
 import time
 from contextlib import asynccontextmanager
 from uuid import UUID
@@ -15,8 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.auth import current_user_id
-from api.jobs.manager import JobManager, JobQueueFullError, JobRateLimitError
-from api.jobs.postgres import PostgresJobManager
+from api.jobs.manager import JobManager, JobQueueFullError
 from api.rate_limit import RateLimitExceeded, SlidingWindowRateLimiter
 from api.repositories.postgres_run_repository import InvalidCursor, PostgresRunRepository
 from api.schemas.models import (
@@ -32,7 +29,7 @@ from api.serialization import run_detail, run_list_item
 from api.services.compare_service import compare_runs
 from api.services.csv_export import build_csv
 from src import config, vector_store
-from src.data_generator import NICHES, PLATFORMS
+from src.platforms import PLATFORMS
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +39,6 @@ def create_app(
     job_manager=None,
     initialize_database: bool = True,
     indexed_count: int | None = None,
-    job_backend: str | None = None,
 ) -> FastAPI:
     ip_rate_limiter = SlidingWindowRateLimiter(
         config.MAX_MATCH_JOBS_PER_IP_PER_HOUR,
@@ -55,13 +51,9 @@ def create_app(
             _validate_public_configuration()
         repo = application.state.run_repository
         manager = application.state.job_manager
-        backend_name = (job_backend or config.JOB_BACKEND).lower()
-        durable_jobs = backend_name == "postgres"
-        if config.APP_ENV == "production" and not durable_jobs:
-            raise RuntimeError("Production requires JOB_BACKEND=postgres")
         application.state.db_ready = False
         application.state.database_available = False
-        application.state.durable_jobs = durable_jobs
+        application.state.index_model_mismatch = False
         application.state.indexed_count = indexed_count or 0
         application.state.index_checked_at = 0.0
         application.state.startup_error = None
@@ -73,11 +65,16 @@ def create_app(
                     application.state.indexed_count = await asyncio.to_thread(_initialize_database, repo)
                 else:
                     application.state.indexed_count = await asyncio.to_thread(_check_database)
-                if durable_jobs and hasattr(repo, "check_schema"):
-                    await asyncio.to_thread(repo.check_schema)
                 application.state.database_available = True
                 application.state.index_checked_at = time.monotonic()
                 application.state.db_ready = application.state.indexed_count > 0
+            except vector_store.IndexModelMismatch as exc:
+                application.state.database_available = True
+                application.state.index_model_mismatch = True
+                application.state.indexed_count = 0
+                application.state.db_ready = False
+                application.state.startup_error = "INDEX_MODEL_MISMATCH"
+                logger.error("Creator index needs a reindex: %s", exc)
             except Exception as exc:
                 application.state.database_available = False
                 application.state.startup_error = type(exc).__name__
@@ -86,22 +83,14 @@ def create_app(
             application.state.database_available = repo is not None
             application.state.db_ready = application.state.database_available and application.state.indexed_count > 0
         if manager is None and repo is not None:
-            if durable_jobs:
-                manager = PostgresJobManager(
-                    connection_factory=getattr(repo, "_connection_factory", None),
-                )
-                if config.RUN_SCHEMA_ON_STARTUP:
-                    manager.ensure_schema()
-            else:
-                manager = JobManager(
-                    repo,
-                    indexed_count_provider=lambda: application.state.indexed_count,
-                    max_jobs=config.MAX_MEMORY_JOBS,
-                    max_jobs_per_owner_per_hour=config.MAX_MATCH_JOBS_PER_USER_PER_HOUR,
-                )
+            # Jobs are in-process. The free tier cannot afford a worker, so a
+            # restart loses an in-flight match; completed runs are persisted.
+            manager = JobManager(
+                repo,
+                indexed_count_provider=lambda: application.state.indexed_count,
+                max_jobs=config.MAX_MEMORY_JOBS,
+            )
             application.state.job_manager = manager
-        if initialize_database and not durable_jobs and config.APP_ENV != "demo":
-            threading.Thread(target=_warm_embedding_model, name="embedding-warmup", daemon=True).start()
         yield
         if manager is not None:
             manager.shutdown()
@@ -119,7 +108,7 @@ def create_app(
     application.state.index_checked_at = 0.0
     application.state.startup_error = None
     application.state.uses_database = initialize_database
-    application.state.durable_jobs = (job_backend or config.JOB_BACKEND).lower() == "postgres"
+    application.state.index_model_mismatch = False
 
     origins = [
         origin.strip()
@@ -153,7 +142,9 @@ def create_app(
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
         logger.error("Unhandled API error: %s", type(exc).__name__)
-        response = JSONResponse(
+        # CORSMiddleware already adds the allow-origin header on the way out for
+        # permitted origins, so this response needs nothing extra.
+        return JSONResponse(
             status_code=500,
             content={
                 "detail": {
@@ -162,15 +153,10 @@ def create_app(
                 }
             },
         )
-        origin = request.headers.get("origin")
-        if origin and origin in origins:
-            response.headers["access-control-allow-origin"] = origin
-            response.headers["vary"] = "Origin"
-        return response
 
     @application.get("/health/live")
     def live():
-        return {"status": "ok"}
+        return {"status": "ok", "memory_rss_mb": _rss_mb()}
 
     @application.get("/health/ready")
     def ready(request: Request):
@@ -179,6 +165,17 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={"code": "DATABASE_UNAVAILABLE", "message": "The creator database is unavailable."},
+            )
+        if request.app.state.index_model_mismatch:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "INDEX_MODEL_MISMATCH",
+                    "message": (
+                        f"The creator index was built with a different embedding model than "
+                        f"{config.EMBED_MODEL}. It must be re-embedded before matching works."
+                    ),
+                },
             )
         if not request.app.state.db_ready or request.app.state.indexed_count <= 0:
             raise HTTPException(
@@ -189,7 +186,9 @@ def create_app(
             "status": "ready",
             "database": True,
             "indexed_creator_count": request.app.state.indexed_count,
-            "embedding_model": config.LOCAL_EMBED_MODEL,
+            "embedding_model": config.EMBED_MODEL,
+            "embed_dimensions": config.EMBED_DIMENSIONS,
+            "memory_rss_mb": _rss_mb(),
         }
 
     @application.get("/api/v1/meta", response_model=MetaResponse)
@@ -197,9 +196,13 @@ def create_app(
         _refresh_index_state(request)
         ready_state = request.app.state.db_ready
         return {
-            "niches": list(NICHES),
             "platforms": ["Any", *PLATFORMS],
             "defaults": {
+                # Empty, not a sample brief: the Search page offers starter
+                # prompts, and pre-filling would make it ambiguous whether the
+                # user actually typed it. The key has to exist even when empty,
+                # because the frontend reads it on every meta load.
+                "goal": "",
                 "audience": "Gen Z",
                 "vibe": "warm, friendly",
                 "top_k": config.DEFAULT_TOP_K_RETRIEVAL,
@@ -212,11 +215,17 @@ def create_app(
                 "top_n_max": config.MAX_TOP_K,
                 "audience_max_length": 300,
                 "vibe_max_length": 500,
+                "goal_min_length": config.MIN_GOAL_LENGTH,
+                "goal_max_length": config.MAX_GOAL_LENGTH,
             },
             "index": {
-                "status": "ready" if ready_state else "unavailable",
+                "status": (
+                    "reindex_required"
+                    if request.app.state.index_model_mismatch
+                    else "ready" if ready_state else "unavailable"
+                ),
                 "count": request.app.state.indexed_count,
-                "embedding_model": config.LOCAL_EMBED_MODEL,
+                "embedding_model": config.EMBED_MODEL,
                 "embed_dimensions": config.EMBED_DIMENSIONS,
             },
             "ranking": {
@@ -231,7 +240,7 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
     )
     def create_match_job(payload: MatchJobRequest, request: Request):
-        _validate_brief(payload.brief.niche, payload.brief.platform)
+        _validate_brief(payload.brief.goal, payload.brief.platform)
         owner_id = current_user_id(request)
         if config.AUTH_REQUIRED and not owner_id:
             raise HTTPException(
@@ -253,7 +262,7 @@ def create_app(
         if manager is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"code": "WORKER_UNAVAILABLE", "message": "The match worker is unavailable."},
+                detail={"code": "MATCH_SERVICE_UNAVAILABLE", "message": "The match service is unavailable."},
             )
         if config.APP_ENV == "demo":
             try:
@@ -263,23 +272,11 @@ def create_app(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail={"code": "MATCH_IP_RATE_LIMIT", "message": "The demo match limit has been reached for this network."},
                 ) from exc
-        if owner_id and request.app.state.durable_jobs and hasattr(manager, "recent_count"):
-            recent = manager.recent_count(owner_id, timezone.utc.now() - timedelta(hours=1))
-            if recent >= config.MAX_MATCH_JOBS_PER_USER_PER_HOUR:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail={"code": "MATCH_RATE_LIMIT", "message": "The hourly match limit has been reached."},
-                )
         try:
             brief = payload.brief.to_domain()
             if owner_id is None:
                 return manager.submit(brief, payload.params)
             return manager.submit(brief, payload.params, owner_id=owner_id)
-        except JobRateLimitError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={"code": "MATCH_RATE_LIMIT", "message": "The hourly match limit has been reached."},
-            ) from exc
         except JobQueueFullError as exc:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -387,12 +384,28 @@ def _initialize_database(repository) -> int:
     repository.ensure_schema()
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
+        vector_store.assert_index_matches_config(conn)
         return vector_store.count_influencers(conn)
 
 
 def _check_database() -> int:
     with vector_store.get_connection() as conn:
+        vector_store.assert_index_matches_config(conn)
         return vector_store.count_influencers(conn)
+
+
+def _rss_mb() -> float | None:
+    """Current resident set size in MB, or None where /proc is unavailable.
+
+    The free service dies at 512 MB, so the number that matters is what the
+    process is holding right now, not its peak.
+    """
+    try:
+        with open("/proc/self/statm", encoding="ascii") as handle:
+            resident_pages = int(handle.read().split()[1])
+        return round(resident_pages * os.sysconf("SC_PAGE_SIZE") / (1024 * 1024), 1)
+    except (OSError, IndexError, ValueError):
+        return None
 
 
 def _refresh_index_state(request: Request) -> None:
@@ -404,25 +417,27 @@ def _refresh_index_state(request: Request) -> None:
         return
     try:
         with vector_store.get_connection() as conn:
+            vector_store.assert_index_matches_config(conn)
             application.state.indexed_count = vector_store.count_influencers(conn)
         application.state.database_available = True
         application.state.index_checked_at = now
         application.state.startup_error = None
+        application.state.index_model_mismatch = False
         application.state.db_ready = application.state.indexed_count > 0
+    except vector_store.IndexModelMismatch:
+        # Re-checked on every refresh so a reindex run against the live
+        # database flips the service back to ready without a redeploy.
+        application.state.database_available = True
+        application.state.index_checked_at = now
+        application.state.index_model_mismatch = True
+        application.state.indexed_count = 0
+        application.state.db_ready = False
+        application.state.startup_error = "INDEX_MODEL_MISMATCH"
     except Exception as exc:
         application.state.database_available = False
         application.state.index_checked_at = now
         application.state.db_ready = False
         application.state.startup_error = type(exc).__name__
-
-
-def _warm_embedding_model() -> None:
-    try:
-        from src.embeddings import get_sentence_transformer
-
-        get_sentence_transformer()
-    except Exception as exc:
-        logger.warning("Embedding warmup failed: %s", type(exc).__name__)
 
 
 def _client_ip(request: Request) -> str:
@@ -444,11 +459,34 @@ def _repository(request: Request):
     return repository
 
 
-def _validate_brief(niche: str, platform: str) -> None:
-    if niche not in NICHES:
+def _validate_brief(goal: str, platform: str) -> None:
+    """Free-text briefs are open-ended; only length and platform are checked.
+
+    The old check rejected anything outside the generator's 30 verticals,
+    which is what forced brief input to be a taxonomy value rather than a
+    description of what the brand actually wants.
+    """
+    text = (goal or "").strip()
+    if len(text) < config.MIN_GOAL_LENGTH:
         raise HTTPException(
             status_code=422,
-            detail={"code": "INVALID_NICHE", "message": "Choose a supported niche."},
+            detail={
+                "code": "GOAL_TOO_SHORT",
+                "message": f"Describe what you are promoting in at least {config.MIN_GOAL_LENGTH} characters.",
+            },
+        )
+    if len(text) > config.MAX_GOAL_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "GOAL_TOO_LONG",
+                "message": f"Keep the brief under {config.MAX_GOAL_LENGTH} characters.",
+            },
+        )
+    if not any(char.isalnum() for char in text):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "GOAL_EMPTY", "message": "Describe what you are promoting in words."},
         )
     if platform not in {"Any", *PLATFORMS}:
         raise HTTPException(

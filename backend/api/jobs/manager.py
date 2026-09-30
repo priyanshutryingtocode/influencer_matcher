@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from threading import RLock
 from typing import Callable
 from uuid import UUID, uuid4
@@ -15,7 +15,6 @@ from src.models import Brief
 
 logger = logging.getLogger(__name__)
 
-MAX_JOBS = 128
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
@@ -23,11 +22,10 @@ class JobQueueFullError(RuntimeError):
     pass
 
 
-class JobRateLimitError(RuntimeError):
-    pass
-
-
 class JobManager:
+    """In-memory match queue. Jobs live only as long as this process, which is
+    the trade the free tier makes; completed runs are persisted separately."""
+
     def __init__(
         self,
         repository,
@@ -35,15 +33,13 @@ class JobManager:
         client_factory: Callable | None = None,
         indexed_count_provider: Callable[[], int | None] | None = None,
         max_workers: int = 1,
-        max_jobs: int = MAX_JOBS,
-        max_jobs_per_owner_per_hour: int | None = None,
+        max_jobs: int = 4,
     ):
         self._repository = repository
         self._matcher = matcher or self._default_match
         self._client_factory = client_factory or get_client
         self._indexed_count_provider = indexed_count_provider or (lambda: None)
         self._max_jobs = max_jobs
-        self._max_jobs_per_owner_per_hour = max_jobs_per_owner_per_hour
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="match-job")
         self._lock = RLock()
         self._jobs: dict[UUID, dict] = {}
@@ -66,19 +62,17 @@ class JobManager:
         }
         with self._lock:
             self._prune_locked()
-            if owner_id and self._max_jobs_per_owner_per_hour is not None:
-                cutoff = now - timedelta(hours=1)
-                recent = sum(
-                    1
-                    for existing in self._jobs.values()
-                    if existing.get("owner_id") == owner_id and existing["created_at"] >= cutoff
-                )
-                if recent >= self._max_jobs_per_owner_per_hour:
-                    raise JobRateLimitError("The hourly match limit has been reached.")
             if len(self._jobs) >= self._max_jobs:
                 raise JobQueueFullError("The match queue is full.")
             self._jobs[job_id] = state
-        self._executor.submit(self._execute, job_id, brief, params, owner_id)
+        try:
+            self._executor.submit(self._execute, job_id, brief, params, owner_id)
+        except RuntimeError as exc:
+            # The executor was shut down between releasing the lock and
+            # submitting, e.g. during app shutdown.
+            with self._lock:
+                self._jobs.pop(job_id, None)
+            raise JobQueueFullError("The match service is shutting down.") from exc
         return self.get(job_id)
 
     def get(self, job_id: UUID, owner_id: str | None = None) -> MatchJobResponse | None:
