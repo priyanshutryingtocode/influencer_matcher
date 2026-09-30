@@ -38,7 +38,6 @@ def test_protected_routes_require_supabase_bearer_token(monkeypatch):
         job_manager=AuthJobManager(),
         initialize_database=False,
         indexed_count=10,
-        job_backend="memory",
     )
     with TestClient(app) as client:
         assert client.get("/api/v1/runs").status_code == 401
@@ -66,7 +65,6 @@ def test_invalid_auth_token_is_rejected(monkeypatch):
         job_manager=AuthJobManager(),
         initialize_database=False,
         indexed_count=10,
-        job_backend="memory",
     )
     with TestClient(app) as client:
         response = client.get("/api/v1/runs", headers={"Authorization": "Bearer invalid"})
@@ -87,7 +85,6 @@ def test_production_requires_security_configuration(monkeypatch):
         job_manager=AuthJobManager(),
         initialize_database=False,
         indexed_count=10,
-        job_backend="memory",
     )
     with pytest.raises(RuntimeError, match="AUTH_REQUIRED"):
         with TestClient(app):
@@ -107,14 +104,13 @@ def test_demo_configuration_allows_memory_jobs(monkeypatch):
         job_manager=AuthJobManager(),
         initialize_database=False,
         indexed_count=10,
-        job_backend="memory",
     )
     with TestClient(app) as client:
         assert client.get("/health/live").status_code == 200
         response = client.post(
             "/api/v1/match-jobs",
             json={
-                "brief": {"niche": "Fitness", "platform": "Any", "audience": "Gen Z", "vibe": "warm"},
+                "brief": {"goal": "at-home strength training for Gen Z", "platform": "Any", "audience": "", "vibe": "warm"},
                 "params": {"top_k": 3, "top_n": 1},
             },
         )

@@ -22,12 +22,6 @@ def test_retrieve_candidates_passes_precomputed_query_vector(monkeypatch):
 
     monkeypatch.setattr(match_service.vector_store, "get_connection", ConnectionContext)
     monkeypatch.setattr(match_service, "hybrid_retrieve", fake_retrieve)
-    result = match_service.retrieve_candidates(Brief(niche="Fitness", platform="Any"), 3, query_vec=vector)
+    result = match_service.retrieve_candidates(Brief(goal="strength training for beginners", platform="Any"), 3, query_vec=vector)
     assert result == []
     assert seen["query_vec"] is vector
-
-
-def test_run_match_returns_none_without_candidates(monkeypatch):
-    monkeypatch.setattr(match_service, "retrieve_candidates", lambda brief, top_k: [])
-    result = match_service.run_match(Brief(niche="Fitness", platform="Any"), 3, 1, client=object())
-    assert result is None

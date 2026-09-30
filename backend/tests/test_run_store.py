@@ -11,8 +11,8 @@ from src.models import Brief, Influencer
 
 def make_influencer(id_: int, **overrides) -> Influencer:
     defaults = dict(
-        id=id_, handle=f"@c{id_}", name=f"Creator {id_}", niche="Fitness",
-        secondary_niches=["Yoga"], platform="TikTok", city="Austin",
+        id=id_, handle=f"@c{id_}", name=f"Creator {id_}",
+        platform="TikTok", city="Austin",
         country="USA", language="English", followers=50_000, engagement=5.5,
         average_views=20_000, average_likes=2_500, average_comments=150,
         verified=False, posts_per_week=5, account_age_years=3,
@@ -25,8 +25,8 @@ def make_influencer(id_: int, **overrides) -> Influencer:
     return Influencer(**defaults)
 
 
-def make_run(niche="Fitness", platform="Any", n=3) -> dict:
-    brief = Brief(niche=niche, platform=platform, audience="gen z", vibe="warm")
+def make_run(goal="at-home strength training for gen z", platform="Any", n=3) -> dict:
+    brief = Brief(goal=goal, platform=platform, audience="", vibe="warm")
     candidates = [make_influencer(i) for i in range(n)]
     ranked = [
         {"id": i, "fit": "strong", "rationale": f"r{i}", "source": "llm"}
@@ -90,7 +90,142 @@ def test_build_csv_contents_and_formula_protection():
     assert rows[0]["evidence"]
 
 
+def test_csv_of_a_run_stored_before_the_taxonomy_removed():
+    """Runs captured while creators still had a niche must keep exporting.
+
+    The API no longer models `niche`, so such a snapshot is re-validated with
+    the field dropped. Extra keys in the stored JSON are ignored rather than
+    raising, which is what keeps an old run readable.
+    """
+    run = make_run(n=1)
+    record = build_run_record(run, uuid4(), indexed_count=10)
+    record["result"]["candidates"][0]["niche"] = "Fitness"
+    record["result"]["candidates"][0]["secondary_niches"] = ["Yoga"]
+    record["created_at"] = datetime.now(timezone.utc)
+    record["updated_at"] = record["created_at"]
+
+    rows = list(csv.DictReader(build_csv(record).splitlines()))
+    assert rows[0]["handle"] == "@c0"
+    assert rows[0]["tags"] == "gym|HIIT"
+
+
+def test_csv_exports_the_new_signals():
+    run = make_run(n=1)
+    candidate = run["candidates"][0]
+    candidate.reach_ratio = 0.421
+    candidate.sponsored_ratio = 0.12
+    candidate.growth_trend = "rising"
+    candidate.audience_top_countries = ["USA", "Canada"]
+    record = build_run_record(run, uuid4(), indexed_count=10)
+    record["created_at"] = datetime.now(timezone.utc)
+    record["updated_at"] = record["created_at"]
+
+    row = next(csv.DictReader(build_csv(record).splitlines()))
+    assert row["reach_ratio"] == "0.421"
+    assert row["sponsored_ratio"] == "0.120"
+    assert row["growth_trend"] == "rising"
+    assert row["audience_top_countries"] == "USA|Canada"
+
+
+def test_csv_exports_grounded_claims():
+    run = make_run(n=1)
+    run["ranked"][0]["grounding"] = [{"field": "tags", "quote": "gym"}]
+    record = build_run_record(run, uuid4(), indexed_count=10)
+    record["created_at"] = datetime.now(timezone.utc)
+    record["updated_at"] = record["created_at"]
+
+    rows = list(csv.DictReader(build_csv(record).splitlines()))
+    assert rows[0]["grounding"] == "tags=gym"
+
+
 @pytest.mark.parametrize("run_id", [uuid4(), uuid4()])
 def test_run_records_have_unique_identifiers(run_id):
     record = build_run_record(make_run(n=1), run_id, indexed_count=10)
     assert record["id"] == run_id
+
+
+def test_fallback_reason_survives_a_store_and_reread():
+    """The reason has to outlive the process that produced it.
+
+    It was write-only: `fallback_reason` lived on the in-memory entry and was
+    dropped when the run was persisted, so a run opened the next morning always
+    showed the generic "ranking was unavailable" message and could not say the
+    quota had simply been spent.
+    """
+    from src.ranking import QUOTA_REASON_TAG
+
+    reason = f"{QUOTA_REASON_TAG}: generate_content(gemini-2.5-flash-lite) exhausted its daily free-tier quota"
+    run = make_run(n=1)
+    run["ranked"][0].update(source="fallback", fallback_reason=reason)
+
+    record = build_run_record(run, uuid4(), indexed_count=10)
+    now = datetime.now(timezone.utc)
+    record["created_at"] = now
+    record["updated_at"] = now
+
+    detail = run_detail(record)
+    assert detail.ranked[0].fallback_reason == reason
+    assert detail.warnings[0].code == "RANKING_FALLBACK"
+    assert "quota" in detail.warnings[0].message.lower()
+
+
+def test_csv_includes_the_fallback_reason():
+    from src.ranking import QUOTA_REASON_TAG
+
+    run = make_run(n=1)
+    run["ranked"][0].update(
+        source="fallback",
+        fallback_reason=f"{QUOTA_REASON_TAG}: exhausted",
+    )
+    record = build_run_record(run, uuid4(), indexed_count=10)
+    record["created_at"] = datetime.now(timezone.utc)
+    record["updated_at"] = record["created_at"]
+
+    row = next(csv.DictReader(build_csv(record).splitlines()))
+    assert row["fallback_reason"].startswith(QUOTA_REASON_TAG)
+
+
+def test_quota_and_outage_warnings_say_different_things():
+    """The wording is the fix, not decoration.
+
+    "Ranking was unavailable" reads as an outage, and the reasonable response
+    to an outage is to retry immediately -- which cannot help when a daily cap
+    is spent. The quota message has to name the cap and the reset.
+    """
+    from src.ranking import QUOTA_REASON_TAG
+
+    run = make_run(n=1)
+    ranked_quota = [{"source": "fallback",
+                     "fallback_reason": f"{QUOTA_REASON_TAG}: exhausted its daily free-tier quota"}]
+    ranked_outage = [{"source": "fallback", "fallback_reason": "APIError: 500"}]
+    brief = run["brief"]
+
+    from api.serialization import build_warnings
+
+    quota = build_warnings(brief, [], ranked_quota)[0]
+    outage = build_warnings(brief, [], ranked_outage)[0]
+
+    assert quota["code"] == outage["code"] == "RANKING_FALLBACK"
+    assert "quota" in quota["message"].lower()
+    assert "midnight Pacific" in quota["message"]
+    assert quota["message"] != outage["message"]
+    assert "unavailable" in outage["message"]
+    # The technical reason is one click away either way.
+    assert quota["details"]["reason"].startswith(QUOTA_REASON_TAG)
+    assert outage["details"]["reason"] == "APIError: 500"
+
+
+def test_a_quota_fallback_is_still_an_error_severity():
+    """Results really are unranked, so the alert styling is correct.
+
+    Quota exhaustion is routine at 20 calls/day, but downgrading the severity
+    would calm the styling over a genuinely degraded result.
+    """
+    from src.ranking import QUOTA_REASON_TAG
+    from api.serialization import build_warnings
+
+    run = make_run(n=1)
+    warning = build_warnings(
+        run["brief"], [], [{"source": "fallback", "fallback_reason": f"{QUOTA_REASON_TAG}: spent"}]
+    )[0]
+    assert warning["severity"] == "error"
