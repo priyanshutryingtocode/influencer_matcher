@@ -30,7 +30,7 @@ from time import perf_counter
 
 from api.repositories.postgres_run_repository import PostgresRunRepository
 from src import config, vector_store
-from src.embeddings import embed_query, get_cached_query_vector
+from src.embeddings import EmbeddingCache, embed_query, get_cached_query_vector
 from src.text_match import overlap_ratio, terms
 from src.gemini_client import get_client
 from src.match_service import rank_match, retrieve_candidates
@@ -39,7 +39,20 @@ from src.models import Brief
 BACKEND_ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES = BACKEND_ROOT / "data" / "evaluation_cases.json"
 DEFAULT_OUTPUT = BACKEND_ROOT / "reports" / "evaluation-report.json"
+DEFAULT_QUERY_CACHE = BACKEND_ROOT / ".embed-cache"
 ANY_PLATFORM = "*"
+
+
+def default_query_cache_path() -> Path:
+    """A cache file dedicated to query vectors.
+
+    Deliberately not the document cache that main.py writes: Gemini embeds
+    under a different task type for queries than for documents, so one text
+    has two legitimate vectors. Sharing a file would hand a document vector to
+    retrieval and quietly skew every retrieval score.
+    """
+    safe_model = config.EMBED_MODEL.replace("/", "_")
+    return DEFAULT_QUERY_CACHE / f"{safe_model}-{config.EMBED_DIMENSIONS}d-queries.jsonl"
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +69,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sequential", action="store_true",
         help="Run cases one at a time with even spacing (pre-parallel behavior).",
+    )
+    parser.add_argument(
+        "--query-cache", type=Path, default=None,
+        help="Reuse and append query vectors here so a repeat run costs no "
+             "embedding quota (default: backend/.embed-cache/*-queries.jsonl).",
+    )
+    parser.add_argument(
+        "--no-query-cache", action="store_true",
+        help="Re-embed every case even if its vector was computed before.",
     )
     args = parser.parse_args()
     if args.top_k <= 0 or args.top_n <= 0 or args.top_n > args.top_k:
@@ -170,12 +192,12 @@ def _warmup(conn) -> None:
     vector_store.search(conn, query_embedding=query_vec, platform="Any", top_k=1)
 
 
-def _run_case_in_own_connection(client, case: dict, top_k: int, top_n: int) -> dict:
+def _run_case_in_own_connection(client, case: dict, top_k: int, top_n: int, query_cache=None) -> dict:
     with vector_store.get_connection() as conn:
-        return _run_case(client, conn, case, top_k, top_n)
+        return _run_case(client, conn, case, top_k, top_n, query_cache)
 
 
-def _run_case(client, conn, case: dict, top_k: int, top_n: int) -> dict:
+def _run_case(client, conn, case: dict, top_k: int, top_n: int, query_cache=None) -> dict:
     brief = Brief(
         goal=case["goal"], platform=case.get("platform", "Any"),
         audience=case.get("audience", ""), vibe=case.get("vibe", ""),
@@ -184,7 +206,7 @@ def _run_case(client, conn, case: dict, top_k: int, top_n: int) -> dict:
     brief_terms = terms(f"{brief.goal} {brief.audience} {brief.vibe}")
 
     embed_start = perf_counter()
-    query_vec = get_cached_query_vector(brief.query_text())
+    query_vec = get_cached_query_vector(brief.query_text(), query_cache)
     embed_ms = round((perf_counter() - embed_start) * 1000, 1)
 
     search_start = perf_counter()
@@ -245,6 +267,10 @@ def main() -> None:
     client = get_client()
     case_results: list[dict | None] = [None] * len(cases)
 
+    query_cache = None
+    if not args.no_query_cache:
+        query_cache = EmbeddingCache(args.query_cache or default_query_cache_path())
+
     PostgresRunRepository().ensure_schema()
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
@@ -261,7 +287,7 @@ def main() -> None:
             if idx > 0:
                 time.sleep(spacing)
             with vector_store.get_connection() as conn:
-                case_results[idx] = _run_case(client, conn, case, args.top_k, args.top_n)
+                case_results[idx] = _run_case(client, conn, case, args.top_k, args.top_n, query_cache)
     else:
         windows = batch_windows(len(cases), args.rate_limit_per_min)
         for w, window in enumerate(windows):
@@ -276,7 +302,8 @@ def main() -> None:
                 futures = {}
                 for idx in window:
                     futures[idx] = pool.submit(
-                        _run_case_in_own_connection, client, cases[idx], args.top_k, args.top_n
+                        _run_case_in_own_connection, client, cases[idx], args.top_k, args.top_n,
+                        query_cache,
                     )
                 for idx, future in futures.items():
                     case_results[idx] = future.result()
@@ -355,6 +382,14 @@ def main() -> None:
         "dataset_size": dataset_size,
         "top_k": args.top_k,
         "top_n": args.top_n,
+        # Counters come from the disk layer only, so a repeat run reporting
+        # hits == case_count is the evidence that it cost no embedding quota.
+        "query_cache": {
+            "enabled": query_cache is not None,
+            "path": str(query_cache.path) if query_cache is not None else None,
+            "hits": query_cache.hits if query_cache is not None else 0,
+            "misses": query_cache.misses if query_cache is not None else 0,
+        },
         "headline": headline,
         "cases": report_results,
         "summary": summary,

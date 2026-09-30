@@ -6,6 +6,7 @@ floor is turned off so the tests do not sleep.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -256,3 +257,86 @@ def test_request_floor_spaces_calls(monkeypatch):
 
     assert fake.slept == [1.0, 1.0]
 
+
+def test_query_cache_path_is_separate_from_the_document_cache():
+    """One text has two legitimate vectors -- Gemini embeds it under
+    RETRIEVAL_DOCUMENT and RETRIEVAL_QUERY -- so the two caches must not
+    share a file or retrieval gets handed a document vector."""
+    from evaluate import default_query_cache_path
+
+    assert default_query_cache_path().name.endswith("-queries.jsonl")
+    assert default_query_cache_path() != default_query_cache_path().with_name(
+        default_query_cache_path().name.replace("-queries", "")
+    )
+
+
+def test_a_document_vector_is_never_served_to_a_query(tmp_path, fake_api, recorder):
+    fake_api()
+    shared = "sustainable fashion thrift creator"
+    doc_cache = embeddings.EmbeddingCache(tmp_path / "docs.jsonl")
+    doc_vector = embeddings.embed_documents([shared])[0]
+    doc_cache.put_many([(embeddings.text_key(shared), doc_vector)])
+
+    before = len(recorder)
+    query_cache = embeddings.EmbeddingCache(tmp_path / "queries.jsonl")
+    embeddings.get_cached_query_vector(shared, query_cache)
+
+    assert len(recorder) == before + 1, "query was answered without an embedding request"
+    assert recorder[-1]["task_type"] == "RETRIEVAL_QUERY"
+    assert query_cache.misses == 1
+    assert len(query_cache) == 1
+
+
+def test_repeat_run_spends_no_embedding_quota(tmp_path, fake_api, recorder):
+    fake_api()
+    path = tmp_path / "queries.jsonl"
+    first = embeddings.EmbeddingCache(path)
+    original = embeddings.get_cached_query_vector("a fashion brief", first)
+    assert len(recorder) == 1
+
+    embeddings._query_cache.clear()  # a fresh process starts with an empty LRU
+    second = embeddings.EmbeddingCache(path)
+    resumed = embeddings.get_cached_query_vector("a fashion brief", second)
+
+    assert len(recorder) == 1, "the repeat run re-billed the embedding quota"
+    assert second.hits == 1
+    assert np.allclose(original, resumed)
+
+
+def test_query_cache_ignores_records_from_another_model(tmp_path):
+    path = tmp_path / "queries.jsonl"
+    embeddings.EmbeddingCache(path, model="gemini-embedding-001").put_many(
+        [("k", np.ones(config.EMBED_DIMENSIONS, dtype=np.float32))]
+    )
+
+    assert embeddings.EmbeddingCache(path, model="text-embedding-004").get("k") is None
+
+
+def test_the_service_path_never_touches_disk(fake_api, monkeypatch):
+    """A live request must not read or write the cache: Render's filesystem is
+    ephemeral and the cache holds every vector it has seen in memory."""
+
+    def boom(*args, **kwargs):
+        raise AssertionError("the default query path persisted to disk")
+
+    monkeypatch.setattr(embeddings.EmbeddingCache, "put_many", boom)
+    assert embeddings.get_cached_query_vector("a brief") is not None
+
+
+def test_concurrent_writers_do_not_interleave_records(tmp_path):
+    """One record is ~15 KB of JSON, far past the size at which an append is
+    atomic, so the evaluator's concurrent cases would corrupt the file without
+    the write lock."""
+    cache = embeddings.EmbeddingCache(tmp_path / "queries.jsonl")
+    dim = config.EMBED_DIMENSIONS
+
+    def write(i):
+        vector = np.random.default_rng(i).normal(size=dim).astype(np.float32)
+        cache.put_many([(f"key-{i}", vector)])
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(write, range(24)))
+
+    lines = [ln for ln in (tmp_path / "queries.jsonl").read_text().splitlines() if ln.strip()]
+    assert len(lines) == 24
+    assert len({json.loads(ln)["key"] for ln in lines}) == 24

@@ -6,6 +6,8 @@ is what keeps the API service inside a 512 MB free-tier budget: a local
 SentenceTransformer pulls in torch, which alone exceeds the whole allowance.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import threading
@@ -105,24 +107,52 @@ _query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 _query_cache_lock = threading.Lock()
 
 
-def get_cached_query_vector(text: str) -> np.ndarray:
-    key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+def _remember_query(key: str, vector: np.ndarray) -> None:
+    with _query_cache_lock:
+        _query_cache[key] = vector
+        _query_cache.move_to_end(key)
+        while len(_query_cache) > _QUERY_CACHE_SIZE:
+            _query_cache.popitem(last=False)
+
+
+def get_cached_query_vector(text: str, cache: EmbeddingCache | None = None) -> np.ndarray:
+    """Embed a brief, reusing whatever has already been computed for it.
+
+    `cache` is opt-in and defaults to None. The service leaves it None on
+    purpose: a live request must not touch the disk, and EmbeddingCache holds
+    every vector it has seen in memory, so wiring it into the request path
+    would trade a bounded 128-entry LRU for unbounded growth on a 512 MB box.
+
+    Offline tools pass a cache so a run can be repeated without re-billing the
+    daily embedding quota. It must be a *query* cache: Gemini embeds documents
+    and queries under different task types, so the same text yields two
+    different vectors and the two must never share a file.
+    """
+    key = text_key(text)
+
     with _query_cache_lock:
         cached = _query_cache.get(key)
         if cached is not None:
             _query_cache.move_to_end(key)
             return cached
-    vec = embed_query(text)
+
+    if cache is not None:
+        vector = cache.get(key)
+        if vector is not None:
+            _remember_query(key, vector)
+            return vector
+
+    vector = embed_query(text)
     with _query_cache_lock:
         # Another thread may have embedded the same brief while we waited on
         # the API; prefer whichever landed first so we only ever cache one.
-        cached = _query_cache.get(key)
-        if cached is not None:
-            return cached
-        _query_cache[key] = vec
-        while len(_query_cache) > _QUERY_CACHE_SIZE:
-            _query_cache.popitem(last=False)
-        return vec
+        settled = _query_cache.get(key)
+        if settled is not None:
+            return settled
+    _remember_query(key, vector)
+    if cache is not None:
+        cache.put_many([(key, vector)])
+    return vector
 
 
 def text_key(text: str) -> str:
@@ -146,6 +176,11 @@ class EmbeddingCache:
         self.hits = 0
         self.misses = 0
         self._vectors: dict[str, list[float]] = {}
+        # The evaluator embeds cases concurrently, and one record is ~15 KB of
+        # JSON -- far too large for an append to be atomic. Concurrent writers
+        # would interleave mid-record and corrupt the file, so writes are
+        # serialised. Reads are plain dict lookups and need no lock.
+        self._write_lock = threading.Lock()
         self._load()
 
     def _load(self) -> None:
@@ -189,17 +224,18 @@ class EmbeddingCache:
     def put_many(self, entries: list[tuple[str, np.ndarray]]) -> None:
         if not entries:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            for key, vector in entries:
-                self._vectors[key] = [float(value) for value in vector]
-                handle.write(json.dumps({
-                    "key": key,
-                    "model": self.model,
-                    "dimensions": self.dimensions,
-                    "values": self._vectors[key],
-                }) + "\n")
-            handle.flush()
+        with self._write_lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as handle:
+                for key, vector in entries:
+                    self._vectors[key] = [float(value) for value in vector]
+                    handle.write(json.dumps({
+                        "key": key,
+                        "model": self.model,
+                        "dimensions": self.dimensions,
+                        "values": self._vectors[key],
+                    }) + "\n")
+                handle.flush()
 
     def __len__(self) -> int:
         return len(self._vectors)
