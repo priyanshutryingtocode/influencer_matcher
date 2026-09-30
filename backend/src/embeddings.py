@@ -1,63 +1,104 @@
 """Embedding and indexing: turns influencer profiles and brand briefs into
-vectors, so retrieval.py can do semantic search over them."""
+vectors, so retrieval.py can do semantic search over them.
+
+Embeddings come from the Gemini embedding API rather than a local model. That
+is what keeps the API service inside a 512 MB free-tier budget: a local
+SentenceTransformer pulls in torch, which alone exceeds the whole allowance.
+"""
 
 import hashlib
+import json
 import threading
+import time
 from collections import OrderedDict
+from pathlib import Path
 
 import numpy as np
 
 from . import config
+from .gemini_client import embed_content_throttled, get_client
 from .models import Influencer
 
 BATCH_SIZE = 50
 
-_sentence_transformer = None
-_model_lock = threading.Lock()
+_client = None
+_client_lock = threading.Lock()
+
+_last_request_at = 0.0
+_request_lock = threading.Lock()
 
 
-def get_sentence_transformer() -> "SentenceTransformer":
-    """Get or create the cached Sentence Transformer model.
+def get_embedding_client():
+    """Cached Gemini client. The SDK client is safe to share across threads."""
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                _client = get_client()
+    return _client
 
-    Import is deferred to avoid loading heavy deps (torch, transformers)
-    at module import time -- only loads when first embedding is requested.
+
+def _throttle() -> None:
+    """Space out API calls to stay under the free tier's per-minute cap.
+
+    The lock is held across the sleep on purpose: it makes the interval a
+    process-wide floor rather than a per-thread one, so concurrent callers
+    queue instead of bursting past the quota.
     """
-    global _sentence_transformer
-    if _sentence_transformer is None:
-        with _model_lock:
-            if _sentence_transformer is None:
-                from sentence_transformers import SentenceTransformer
-                print(f"Loading Sentence Transformer: {config.LOCAL_EMBED_MODEL}")
-                _sentence_transformer = SentenceTransformer(config.LOCAL_EMBED_MODEL)
-                _check_dimensions(_sentence_transformer)
-    return _sentence_transformer
+    global _last_request_at
+    interval = config.EMBED_REQUEST_INTERVAL_SECONDS
+    if interval <= 0:
+        return
+    with _request_lock:
+        wait = interval - (time.monotonic() - _last_request_at)
+        if wait > 0:
+            time.sleep(wait)
+        _last_request_at = time.monotonic()
 
 
-def _check_dimensions(model) -> None:
-    """Fail loudly if the configured model's output width doesn't match the
-    VECTOR(...) column -- pgvector would reject every insert otherwise."""
-    probe = np.asarray(model.encode(["dim"], show_progress_bar=False))
-    if probe.shape[-1] != config.EMBED_DIMENSIONS:
+def _normalize(vector) -> np.ndarray:
+    """L2-normalize so pgvector's cosine distance is exact.
+
+    The API's Matryoshka-truncated vectors are not unit-norm, and the search
+    compares them with `embedding <=> query`.
+    """
+    array = np.asarray(vector, dtype=np.float32)
+    norm = float(np.linalg.norm(array))
+    if norm == 0.0:
+        raise RuntimeError(f"{config.EMBED_MODEL} returned a zero-magnitude vector")
+    return array / norm
+
+
+def _embed(text: str, task_type: str) -> np.ndarray:
+    """Embed one text. The API accepts a single content per request."""
+    _throttle()
+    response = embed_content_throttled(
+        get_embedding_client(),
+        config.EMBED_MODEL,
+        text,
+        task_type=task_type,
+        output_dimensionality=config.EMBED_DIMENSIONS,
+    )
+    values = response.embeddings[0].values
+    vector = _normalize(values)
+    if vector.shape[-1] != config.EMBED_DIMENSIONS:
         raise RuntimeError(
-            f"{config.LOCAL_EMBED_MODEL} produces {probe.shape[-1]}-dim vectors "
-            f"but EMBED_DIMENSIONS={config.EMBED_DIMENSIONS}. Update "
-            f"EMBED_DIMENSIONS (requires a --reindex) or pick a matching model."
+            f"{config.EMBED_MODEL} returned {vector.shape[-1]}-dim vectors but "
+            f"EMBED_DIMENSIONS={config.EMBED_DIMENSIONS}. Change both together "
+            f"and reindex."
         )
+    return vector
 
 
-def embed_texts(texts: list[str]) -> list[np.ndarray]:
-    """Embed texts locally with Sentence Transformers (no API involved)."""
-    texts = [config.EMBED_PASSAGE_PREFIX + t for t in texts]
-    return embed_texts_local(texts)
+def embed_documents(texts: list[str]) -> list[np.ndarray]:
+    """Embed creator profiles for indexing (RETRIEVAL_DOCUMENT)."""
+    return [_embed(text, config.EMBED_TASK_DOCUMENT) for text in texts]
 
 
-def embed_texts_local(texts: list[str]) -> list[np.ndarray]:
-    """Embed texts using Sentence Transformer model."""
-    model = get_sentence_transformer()
-    embeddings = model.encode(texts, show_progress_bar=False)
-    if len(embeddings.shape) == 1:
-        return [embeddings]
-    return [embeddings[i] for i in range(len(embeddings))]
+def embed_query(text: str) -> np.ndarray:
+    """Embed a brand brief for retrieval (RETRIEVAL_QUERY)."""
+    return _embed(text, config.EMBED_TASK_QUERY)
+
 
 _QUERY_CACHE_SIZE = 128
 _query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
@@ -71,20 +112,127 @@ def get_cached_query_vector(text: str) -> np.ndarray:
         if cached is not None:
             _query_cache.move_to_end(key)
             return cached
-    vec = embed_texts_local([config.EMBED_QUERY_PREFIX + text])[0]
+    vec = embed_query(text)
     with _query_cache_lock:
+        # Another thread may have embedded the same brief while we waited on
+        # the API; prefer whichever landed first so we only ever cache one.
+        cached = _query_cache.get(key)
+        if cached is not None:
+            return cached
         _query_cache[key] = vec
         while len(_query_cache) > _QUERY_CACHE_SIZE:
             _query_cache.popitem(last=False)
-    return vec
+        return vec
 
 
-def index_influencers(influencers: list[Influencer]) -> None:
+def text_key(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+class EmbeddingCache:
+    """Append-only content-hash -> vector store on disk.
+
+    Reindexing spends a large slice of the daily embedding quota, and a plain
+    network hiccup halfway through would otherwise throw that spend away. The
+    synthetic corpus is seeded, so re-running a reindex produces the same texts
+    and every hit here is a request we do not have to make again. Entries
+    recorded with a different model or width are ignored, so a cache from an
+    earlier embedder can never poison a new index.
+    """
+
+    def __init__(self, path: Path, model: str | None = None, dimensions: int | None = None):
+        self.path = Path(path)
+        self.model = model or config.EMBED_MODEL
+        self.dimensions = dimensions or config.EMBED_DIMENSIONS
+        self.hits = 0
+        self.misses = 0
+        self._vectors: dict[str, list[float]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        with self.path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # truncated final line from an interrupted run
+                if record.get("model") != self.model or record.get("dimensions") != self.dimensions:
+                    continue
+                key = record.get("key")
+                values = record.get("values")
+                if isinstance(key, str) and isinstance(values, list):
+                    self._vectors[key] = values
+
+    def contains(self, key: str) -> bool:
+        """Membership test that leaves the hit/miss counters untouched.
+
+        The CLI uses this to size the remaining work before spending anything,
+        so the report it prints describes the run that is about to happen
+        rather than the one that already finished.
+        """
+        return key in self._vectors
+
+    def get(self, key: str) -> np.ndarray | None:
+        values = self._vectors.get(key)
+        if values is None:
+            self.misses += 1
+            return None
+        self.hits += 1
+        # Re-normalize on read so a hand-edited or older cache file still
+        # yields exact cosine distances.
+        return _normalize(values)
+
+    def put_many(self, entries: list[tuple[str, np.ndarray]]) -> None:
+        if not entries:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            for key, vector in entries:
+                self._vectors[key] = [float(value) for value in vector]
+                handle.write(json.dumps({
+                    "key": key,
+                    "model": self.model,
+                    "dimensions": self.dimensions,
+                    "values": self._vectors[key],
+                }) + "\n")
+            handle.flush()
+
+    def __len__(self) -> int:
+        return len(self._vectors)
+
+
+def index_influencers(
+    influencers: list[Influencer],
+    cache: EmbeddingCache | None = None,
+) -> None:
     """Populate the .embedding field on every influencer, in this process.
+
     Vectors are persisted to Postgres/pgvector by vector_store.replace_influencers,
-    so this only runs on generation/reindex, not on every query."""
-    for start in range(0, len(influencers), BATCH_SIZE):
-        batch = influencers[start:start + BATCH_SIZE]
-        vectors = embed_texts([inf.corpus_text() for inf in batch])
-        for inf, vec in zip(batch, vectors):
-            inf.embedding = vec
+    so this only runs on generation/reindex, not on every query. When a cache is
+    supplied, already-embedded texts are reused and only the misses are billed.
+    """
+    done = 0
+    pending: list[tuple[Influencer, str]] = []
+    for influencer in influencers:
+        text = influencer.corpus_text()
+        key = text_key(text)
+        vector = cache.get(key) if cache is not None else None
+        if vector is None:
+            pending.append((influencer, text))
+        else:
+            influencer.embedding = vector
+            done += 1
+
+    for start in range(0, len(pending), BATCH_SIZE):
+        batch = pending[start:start + BATCH_SIZE]
+        vectors = embed_documents([text for _, text in batch])
+        for (influencer, _), vec in zip(batch, vectors):
+            influencer.embedding = vec
+        if cache is not None:
+            cache.put_many([(text_key(text), vec) for (_, text), vec in zip(batch, vectors)])
+        done += len(batch)
+        print(f"  embedded {done}/{len(influencers)}", flush=True)
