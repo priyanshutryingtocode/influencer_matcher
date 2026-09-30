@@ -23,37 +23,52 @@ SUPABASE_JWKS_URL = os.environ.get("SUPABASE_JWKS_URL") or (
 )
 SUPABASE_ISSUER = os.environ.get("SUPABASE_ISSUER") or (f"{SUPABASE_URL.rstrip('/')}/auth/v1" if SUPABASE_URL else None)
 SUPABASE_JWT_AUDIENCE = os.environ.get("SUPABASE_JWT_AUDIENCE", "authenticated")
-JOB_BACKEND = os.environ.get("JOB_BACKEND", "postgres" if APP_ENV == "production" else "memory").lower()
 RUN_SCHEMA_ON_STARTUP = os.environ.get("RUN_SCHEMA_ON_STARTUP", "false" if APP_ENV == "production" else "true").lower() == "true"
-HF_HOME = os.environ.get("HF_HOME") or str(ROOT_DIR / "backend" / "model-cache")
 
 GEN_MODEL = "gemini-2.5-flash-lite"
 
-LOCAL_EMBED_MODEL = os.environ.get("LOCAL_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+# Ceiling on the ranking response. Sized from the schema's worst case (a short
+# list, each entry carrying MAX_GROUNDING_PER_ENTRY citations of MAX_QUOTE_LENGTH
+# characters) plus headroom, because a response truncated mid-string cannot be
+# parsed and the whole ranking falls back to retrieval order. The free tier
+# meters requests per day rather than tokens, so the headroom is not charged
+# against the daily call budget.
+RANKING_MAX_OUTPUT_TOKENS = int(os.environ.get("RANKING_MAX_OUTPUT_TOKENS", "2048"))
+if RANKING_MAX_OUTPUT_TOKENS <= 0:
+    raise RuntimeError("RANKING_MAX_OUTPUT_TOKENS must be a positive integer")
 
-EMBED_DIMENSIONS = int(os.environ.get("EMBED_DIMENSIONS", "384"))
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "gemini-embedding-001")
+
+EMBED_DIMENSIONS = int(os.environ.get("EMBED_DIMENSIONS", "768"))
 if EMBED_DIMENSIONS <= 0:
     raise RuntimeError("EMBED_DIMENSIONS must be a positive integer")
 
-EMBED_QUERY_PREFIX = os.environ.get("EMBED_QUERY_PREFIX", "")
-EMBED_PASSAGE_PREFIX = os.environ.get("EMBED_PASSAGE_PREFIX", "")
+EMBED_TASK_DOCUMENT = os.environ.get("EMBED_TASK_DOCUMENT", "RETRIEVAL_DOCUMENT")
+EMBED_TASK_QUERY = os.environ.get("EMBED_TASK_QUERY", "RETRIEVAL_QUERY")
+
+# Process-wide floor between embedding API calls. The free tier allows 100
+# requests/minute; the default keeps a bulk reindex near 60. Callers that pace
+# themselves (the evaluator) can set this to 0.
+EMBED_REQUEST_INTERVAL_SECONDS = float(os.environ.get("EMBED_REQUEST_INTERVAL_SECONDS", "1.0"))
+if EMBED_REQUEST_INTERVAL_SECONDS < 0:
+    raise RuntimeError("EMBED_REQUEST_INTERVAL_SECONDS cannot be negative")
 
 DEFAULT_INFLUENCER_COUNT = 60
 DEFAULT_TOP_K_RETRIEVAL = 10
 DEFAULT_TOP_N_RANKED = 5
 
+# A free-text brief. The floor is enforced on write only, so stored runs whose
+# brief was a short fixed label still validate when they are read back.
+MIN_GOAL_LENGTH = int(os.environ.get("MIN_GOAL_LENGTH", "8"))
+MAX_GOAL_LENGTH = int(os.environ.get("MAX_GOAL_LENGTH", "600"))
+if MIN_GOAL_LENGTH < 1 or MAX_GOAL_LENGTH < MIN_GOAL_LENGTH:
+    raise RuntimeError("MIN_GOAL_LENGTH must be positive and no greater than MAX_GOAL_LENGTH")
+
 MAX_INFLUENCER_COUNT = 5000
 MAX_TOP_K = 50
-MAX_MEMORY_JOBS = int(os.environ.get("MAX_MEMORY_JOBS", "4"))
-MAX_MATCH_JOBS_PER_USER_PER_HOUR = int(os.environ.get("MAX_MATCH_JOBS_PER_USER_PER_HOUR", "10"))
+MAX_MEMORY_JOBS = int(os.environ.get("MAX_MEMORY_JOBS", "2"))
 MAX_MATCH_JOBS_PER_IP_PER_HOUR = int(os.environ.get("MAX_MATCH_JOBS_PER_IP_PER_HOUR", "20"))
-STALE_JOB_AFTER_SECONDS = int(os.environ.get("STALE_JOB_AFTER_SECONDS", "900"))
-if (
-    MAX_MEMORY_JOBS <= 0
-    or MAX_MATCH_JOBS_PER_USER_PER_HOUR <= 0
-    or MAX_MATCH_JOBS_PER_IP_PER_HOUR <= 0
-    or STALE_JOB_AFTER_SECONDS <= 0
-):
+if MAX_MEMORY_JOBS <= 0 or MAX_MATCH_JOBS_PER_IP_PER_HOUR <= 0:
     raise RuntimeError("Job limits must be positive integers")
 
 GEMINI_TIMEOUT_MS = 120_000

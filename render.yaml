@@ -6,7 +6,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-10000}
-    healthCheckPath: /health/ready
+    healthCheckPath: /health/live
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.11"
@@ -14,22 +14,20 @@ services:
         value: demo
       - key: AUTH_REQUIRED
         value: "true"
-      - key: JOB_BACKEND
-        value: memory
       - key: RUN_SCHEMA_ON_STARTUP
         value: "true"
       - key: MAX_MEMORY_JOBS
-        value: "4"
-      - key: MAX_MATCH_JOBS_PER_USER_PER_HOUR
-        value: "3"
+        value: "2"
       - key: MAX_MATCH_JOBS_PER_IP_PER_HOUR
         value: "12"
-      - key: LOCAL_EMBED_MODEL
-        value: sentence-transformers/all-MiniLM-L6-v2
+      - key: EMBED_MODEL
+        value: gemini-embedding-001
       - key: EMBED_DIMENSIONS
-        value: "384"
-      - key: HF_HOME
-        value: /tmp/influencer-model-cache
+        value: "768"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       - key: DATABASE_URL
         sync: false
       - key: GEMINI_API_KEY
