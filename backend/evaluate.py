@@ -5,8 +5,14 @@ Usage:
     python evaluate.py --top-k 10 --top-n 5 --output reports/evaluation-report.json
     python evaluate.py --sequential   # old one-at-a-time pacing
 
-Exact niche match is the relevance label for this synthetic dataset. Replace
-these cases with human-labelled outcomes when real creator data is available.
+A case is relevant when a retrieved creator carries at least one of the case's
+`expected_tags`. Replace those tags with human-labelled outcomes when real
+creator data is available.
+
+Relevance is defined by intersection, not equality: creators now span several
+topics, so a creator tagged across two areas counts for both. That inflates
+precision relative to the older single-label definition and makes `pool_size`
+larger, so reports written before this change are not comparable to these.
 
 Cases run in batches sized to the rate limit (default 10/minute): each batch
 fires concurrently, then the runner waits out the rest of that minute-window
@@ -24,7 +30,8 @@ from time import perf_counter
 
 from api.repositories.postgres_run_repository import PostgresRunRepository
 from src import config, vector_store
-from src.embeddings import embed_texts, get_cached_query_vector
+from src.embeddings import embed_query, get_cached_query_vector
+from src.text_match import overlap_ratio, terms
 from src.gemini_client import get_client
 from src.match_service import rank_match, retrieve_candidates
 from src.models import Brief
@@ -32,6 +39,7 @@ from src.models import Brief
 BACKEND_ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES = BACKEND_ROOT / "data" / "evaluation_cases.json"
 DEFAULT_OUTPUT = BACKEND_ROOT / "reports" / "evaluation-report.json"
+ANY_PLATFORM = "*"
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,6 +62,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("top-k and top-n must be positive, and top-n cannot exceed top-k")
     if args.rate_limit_per_min <= 0:
         parser.error("--rate-limit-per-min must be positive")
+    # The runner already paces itself by rate-limit windows, and one window is
+    # far below the embedding free-tier cap. Leaving the per-request floor in
+    # place would serialize the window and inflate the reported embed latency.
+    config.EMBED_REQUEST_INTERVAL_SECONDS = 0.0
     return args
 
 
@@ -68,25 +80,108 @@ def batch_windows(total: int, per_minute: int) -> list[list[int]]:
     ]
 
 
-def niche_precision(items, expected_niche: str) -> float:
-    return sum(item.niche == expected_niche for item in items) / len(items) if items else 0.0
+def tag_precision(items, expected_tags: set[str]) -> float:
+    """Share of retrieved creators carrying at least one of the case's tags.
+
+    Intersection-based by design, since creators now span several topics. The
+    known cost is that a creator tagged across two topics counts as correct for
+    both cases, which inflates precision relative to the old single-label
+    definition; `tag_overlap` is reported alongside so the two can be read
+    together.
+    """
+    if not items or not expected_tags:
+        return 0.0
+    return sum(bool(expected_tags & set(item.tags)) for item in items) / len(items)
+
+
+def pool_sizes(conn, table: str = vector_store.DEFAULT_TABLE) -> dict[tuple[str, str], int]:
+    """Creator counts per (tag, platform), plus a per-tag total under "*".
+
+    The generator gives every topic-group/platform cell a floor, so on a small
+    corpus a filtered query can only ever return as many on-topic creators as
+    that cell contains. Reporting the pool lets the caller say how much of the
+    achievable set was actually found. Tags are unnested so this stays one
+    grouped query over the whole index, costing nothing per case.
+    """
+    rows = conn.execute(
+        f"SELECT tag, platform, COUNT(DISTINCT id) FROM {table}, unnest(tags) AS tag "
+        f"GROUP BY tag, platform"
+    ).fetchall()
+    sizes: dict[tuple[str, str], int] = {}
+    totals: dict[str, int] = {}
+    for tag, platform, count in rows:
+        sizes[(tag, platform)] = int(count)
+        totals[tag] = totals.get(tag, 0) + int(count)
+    for tag, total in totals.items():
+        sizes[(tag, ANY_PLATFORM)] = total
+    return sizes
+
+
+def pool_for(
+    conn,
+    expected_tags: set[str],
+    platform: str,
+    table: str = vector_store.DEFAULT_TABLE,
+) -> int:
+    """Creators in the index that share at least one of the case's tags.
+
+    This is the union, not a sum: a creator carrying two of the tags is one
+    relevant creator, and `COUNT(DISTINCT id)` is what makes that correct.
+    Summing per-tag counts would overstate the pool and make the ceiling
+    unreachable in principle. It cannot come from `pool_sizes` because the
+    relevant set is a union across tags rather than one grouped cell, so it
+    costs one small indexed query per case.
+    """
+    if not expected_tags:
+        return 0
+    sql = (
+        f"SELECT COUNT(DISTINCT {table}.id) FROM {table}, unnest(tags) AS tag "
+        "WHERE tag = ANY(%s)"
+    )
+    params: list = [sorted(expected_tags)]
+    if platform != "Any":
+        sql += f" AND {table}.platform = %s"
+        params.append(platform)
+    return int(conn.execute(sql, params).fetchone()[0])
+
+
+def ceiling_precision(pool: int, k: int) -> float:
+    """Best precision@k this case could reach given what exists in the index."""
+    return min(pool, k) / k if k > 0 else 0.0
+
+
+def recall_of_ceiling(retrieved: int, pool: int, k: int) -> float:
+    """Share of the relevant creators that could fit in the top k.
+
+    1.0 means every achievable match was retrieved, which is the only reading
+    of precision@k that stays comparable across corpus sizes. An empty pool
+    counts as 1.0: there was nothing to find, so nothing was missed.
+    """
+    reachable = min(pool, k)
+    return retrieved / reachable if reachable else 1.0
 
 
 def _warmup(conn) -> None:
-    """Absorb cold-start costs (embedding-model load + first HNSW query) so
+    """Absorb cold-start costs (first embedding API call + first HNSW query) so
     case #1 isn't timed against them. Without this, the very first retrieval
-    pays a multi-second model load plus a cold full-table scan over the Any
-    platform, inflating one case's retrieval_latency by ~45s."""
-    query_vec = embed_texts(["warmup"])[0]
+    pays the embedding round-trip plus a cold full-table scan over the Any
+    platform, inflating one case's retrieval_latency."""
+    query_vec = embed_query("warmup")
     vector_store.search(conn, query_embedding=query_vec, platform="Any", top_k=1)
 
 
-def _run_case(client, case: dict, top_k: int, top_n: int) -> dict:
+def _run_case_in_own_connection(client, case: dict, top_k: int, top_n: int) -> dict:
+    with vector_store.get_connection() as conn:
+        return _run_case(client, conn, case, top_k, top_n)
+
+
+def _run_case(client, conn, case: dict, top_k: int, top_n: int) -> dict:
     brief = Brief(
-        niche=case["niche"], platform=case.get("platform", "Any"),
+        goal=case["goal"], platform=case.get("platform", "Any"),
         audience=case.get("audience", ""), vibe=case.get("vibe", ""),
     )
-    expected_niche = case.get("expected_niche", brief.niche)
+    expected_tags = set(case["expected_tags"])
+    brief_terms = terms(f"{brief.goal} {brief.audience} {brief.vibe}")
 
     embed_start = perf_counter()
     query_vec = get_cached_query_vector(brief.query_text())
@@ -104,13 +199,31 @@ def _run_case(client, case: dict, top_k: int, top_n: int) -> dict:
 
     candidate_by_id = {candidate.id: candidate for candidate in candidates}
     ranked_candidates = [candidate_by_id[item["id"]] for item in ranked]
-    return {
+    retrieved_correct = sum(1 for c in candidates if expected_tags & set(c.tags))
+    ranked_correct = sum(1 for c in ranked_candidates if expected_tags & set(c.tags))
+    pool = pool_for(conn, expected_tags, brief.platform)
+    result = {
         "id": case["id"],
-        "expected_niche": expected_niche,
+        "expected_tags": sorted(expected_tags),
+        "platform": brief.platform,
+        # True when the brief is deliberately worded away from the case's own
+        # tags, so literal word matching cannot pass it. Reported per case, not
+        # averaged -- see the hard_cases block below.
+        "hard": bool(case.get("hard")),
         "retrieved_count": len(candidates),
-        "retrieval_niche_precision_at_k": round(niche_precision(candidates, expected_niche), 3),
-        "retrieval_niche_hit_at_k": any(c.niche == expected_niche for c in candidates),
-        "ranked_niche_precision_at_n": round(niche_precision(ranked_candidates, expected_niche), 3),
+        "retrieval_tag_precision_at_k": round(tag_precision(candidates, expected_tags), 3),
+        "retrieval_tag_hit_at_k": retrieved_correct > 0,
+        # Label-free relevance: how much of the brand's own wording appears in
+        # the creators that came back.
+        "topic_overlap_at_k": round(
+            mean(overlap_ratio(brief_terms, candidate) for candidate in candidates), 3
+        ) if candidates else 0.0,
+        "ranked_tag_precision_at_n": round(tag_precision(ranked_candidates, expected_tags), 3),
+        "pool_size": pool,
+        "ceiling_precision_at_k": round(ceiling_precision(pool, top_k), 3),
+        "recall_of_ceiling_at_k": round(recall_of_ceiling(retrieved_correct, pool, top_k), 3),
+        "ceiling_precision_at_n": round(ceiling_precision(pool, top_n), 3),
+        "recall_of_ceiling_at_n": round(recall_of_ceiling(ranked_correct, pool, top_n), 3),
         "ranking_fallback": any(item.get("source") == "fallback" for item in ranked),
         "fallback_count": sum(1 for item in ranked if item.get("source") == "fallback"),
         "filled_count": sum(1 for item in ranked if item.get("source") == "filled"),
@@ -120,6 +233,7 @@ def _run_case(client, case: dict, top_k: int, top_n: int) -> dict:
         "search_latency_ms": search_ms,
         "ranking_latency_ms": ranking_ms,
     }
+    return result
 
 
 def main() -> None:
@@ -134,7 +248,8 @@ def main() -> None:
     PostgresRunRepository().ensure_schema()
     with vector_store.get_connection() as conn:
         vector_store.init_schema(conn)
-        if not vector_store.count_influencers(conn):
+        dataset_size = vector_store.count_influencers(conn)
+        if not dataset_size:
             raise RuntimeError("No indexed creators. Run main.py --reindex before evaluating.")
         _warmup(conn)
 
@@ -145,7 +260,8 @@ def main() -> None:
         for idx, case in enumerate(cases):
             if idx > 0:
                 time.sleep(spacing)
-            case_results[idx] = _run_case(client, case, args.top_k, args.top_n)
+            with vector_store.get_connection() as conn:
+                case_results[idx] = _run_case(client, conn, case, args.top_k, args.top_n)
     else:
         windows = batch_windows(len(cases), args.rate_limit_per_min)
         for w, window in enumerate(windows):
@@ -154,10 +270,14 @@ def main() -> None:
                 print(f"Window {w + 1}/{len(windows)}: cases "
                       f"{window[0] + 1}-{window[-1] + 1} firing concurrently...")
             with ThreadPoolExecutor(max_workers=len(window)) as pool:
-                futures = {
-                    idx: pool.submit(_run_case, client, cases[idx], args.top_k, args.top_n)
-                    for idx in window
-                }
+                # One connection per case: the pool query is the only
+                # per-case database work, and a shared connection would
+                # serialise it for no benefit.
+                futures = {}
+                for idx in window:
+                    futures[idx] = pool.submit(
+                        _run_case_in_own_connection, client, cases[idx], args.top_k, args.top_n
+                    )
                 for idx, future in futures.items():
                     case_results[idx] = future.result()
 
@@ -172,28 +292,77 @@ def main() -> None:
     report_results = [r for r in case_results if r is not None]
     total_wall = perf_counter() - started
 
+    summary = {
+        "case_count": len(report_results),
+        "mean_retrieval_tag_precision_at_k": round(mean(item["retrieval_tag_precision_at_k"] for item in report_results), 3),
+        "retrieval_tag_hit_rate_at_k": round(mean(item["retrieval_tag_hit_at_k"] for item in report_results), 3),
+        "mean_ranked_tag_precision_at_n": round(mean(item["ranked_tag_precision_at_n"] for item in report_results), 3),
+        "ranking_fallback_rate": round(mean(item["ranking_fallback"] for item in report_results), 3),
+        "total_fallback_slots": sum(item["fallback_count"] for item in report_results),
+        "total_filled_slots": sum(item["filled_count"] for item in report_results),
+        "mean_strong_fits_per_case": round(mean(item["strong_fit_count"] for item in report_results), 2),
+        "mean_retrieval_latency_ms": round(mean(item["retrieval_latency_ms"] for item in report_results), 1),
+        "mean_embed_latency_ms": round(mean(item["embed_latency_ms"] for item in report_results), 1),
+        "mean_search_latency_ms": round(mean(item["search_latency_ms"] for item in report_results), 1),
+        "mean_ranking_latency_ms": round(mean(item["ranking_latency_ms"] for item in report_results), 1),
+        "mean_topic_overlap_at_k": round(mean(item["topic_overlap_at_k"] for item in report_results), 3),
+        "mean_recall_of_ceiling_at_k": round(mean(item["recall_of_ceiling_at_k"] for item in report_results), 3),
+        "mean_recall_of_ceiling_at_n": round(mean(item["recall_of_ceiling_at_n"] for item in report_results), 3),
+        "mean_ceiling_precision_at_k": round(mean(item["ceiling_precision_at_k"] for item in report_results), 3),
+        "mean_ceiling_precision_at_n": round(mean(item["ceiling_precision_at_n"] for item in report_results), 3),
+        "cases_at_ceiling_at_n": sum(1 for item in report_results if item["recall_of_ceiling_at_n"] >= 1.0),
+        "wall_clock_seconds": round(total_wall, 1),
+    }
+    hard = [item for item in report_results if item["hard"]]
+    if hard:
+        # Reported per case, not as a mean. These briefs avoid their own case's
+        # tags, so they are the only evidence that the embedding carries meaning
+        # rather than words -- but three briefs cannot support an average, and a
+        # mean over them reads as a statistic when it is three anecdotes.
+        summary["hard_cases"] = {
+            "case_count": len(hard),
+            "note": (
+                f"{len(hard)} briefs, too few for a mean; read the individual "
+                "cases rather than averaging them"
+            ),
+            "cases": [
+                {
+                    "id": item["id"],
+                    "retrieval_tag_precision_at_k": item["retrieval_tag_precision_at_k"],
+                    "topic_overlap_at_k": item["topic_overlap_at_k"],
+                }
+                for item in hard
+            ],
+        }
+
+    # The figures worth quoting, in one place. The `summary` above keeps every
+    # field for debugging and regression work; most of it is operational detail
+    # that means nothing to a reader.
+    headline = {
+        "dataset_size": dataset_size,
+        "case_count": len(report_results),
+        "mean_retrieval_tag_precision_at_k": summary["mean_retrieval_tag_precision_at_k"],
+        "mean_recall_of_ceiling_at_k": summary["mean_recall_of_ceiling_at_k"],
+        "mean_recall_of_ceiling_at_n": summary["mean_recall_of_ceiling_at_n"],
+        "mean_topic_overlap_at_k": summary["mean_topic_overlap_at_k"],
+        "mean_strong_fits_per_case": summary["mean_strong_fits_per_case"],
+        "ranking_fallback_rate": summary["ranking_fallback_rate"],
+    }
+
     report = {
+        "embedding_model": config.EMBED_MODEL,
+        "embed_dimensions": config.EMBED_DIMENSIONS,
+        "dataset_size": dataset_size,
+        "top_k": args.top_k,
+        "top_n": args.top_n,
+        "headline": headline,
         "cases": report_results,
-        "summary": {
-            "case_count": len(report_results),
-            "mean_retrieval_niche_precision_at_k": round(mean(item["retrieval_niche_precision_at_k"] for item in report_results), 3),
-            "retrieval_niche_hit_rate_at_k": round(mean(item["retrieval_niche_hit_at_k"] for item in report_results), 3),
-            "mean_ranked_niche_precision_at_n": round(mean(item["ranked_niche_precision_at_n"] for item in report_results), 3),
-            "ranking_fallback_rate": round(mean(item["ranking_fallback"] for item in report_results), 3),
-            "total_fallback_slots": sum(item["fallback_count"] for item in report_results),
-            "total_filled_slots": sum(item["filled_count"] for item in report_results),
-            "mean_strong_fits_per_case": round(mean(item["strong_fit_count"] for item in report_results), 2),
-            "mean_retrieval_latency_ms": round(mean(item["retrieval_latency_ms"] for item in report_results), 1),
-            "mean_embed_latency_ms": round(mean(item["embed_latency_ms"] for item in report_results), 1),
-            "mean_search_latency_ms": round(mean(item["search_latency_ms"] for item in report_results), 1),
-            "mean_ranking_latency_ms": round(mean(item["ranking_latency_ms"] for item in report_results), 1),
-            "wall_clock_seconds": round(total_wall, 1),
-        },
+        "summary": summary,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(report["summary"], indent=2))
-    print(f"Full per-case report written to {args.output}")
+    print(json.dumps(report["headline"], indent=2))
+    print(f"\nFull per-case report written to {args.output}")
 
 
 if __name__ == "__main__":
