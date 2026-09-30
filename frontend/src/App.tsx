@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthProvider";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { BackendProvider } from "./backend/BackendProvider";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { ComparePage } from "./pages/ComparePage";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -15,18 +16,23 @@ export function App() {
     <AuthProvider>
       <BackendProvider>
         <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route element={<ProtectedRoute />}>
-              <Route element={<Layout />}>
-                <Route index element={<Navigate to="/search" replace />} />
-                <Route path="search" element={<SearchPage />} />
-                <Route path="history" element={<HistoryPage />} />
-                <Route path="compare" element={<ComparePage />} />
-                <Route path="*" element={<Navigate to="/search" replace />} />
+          {/* Inside the router so the boundary can stay mounted across route
+              changes: a boundary that remounts with the route would reset its
+              error state on every navigation and never recover. */}
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route element={<ProtectedRoute />}>
+                <Route element={<Layout />}>
+                  <Route index element={<Navigate to="/search" replace />} />
+                  <Route path="search" element={<SearchPage />} />
+                  <Route path="history" element={<HistoryPage />} />
+                  <Route path="compare" element={<ComparePage />} />
+                  <Route path="*" element={<Navigate to="/search" replace />} />
+                </Route>
               </Route>
-            </Route>
-          </Routes>
+            </Routes>
+          </ErrorBoundary>
         </BrowserRouter>
       </BackendProvider>
     </AuthProvider>

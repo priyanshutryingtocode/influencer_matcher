@@ -4,6 +4,12 @@ import { useAuth } from "../auth/AuthProvider";
 import { AccountMenu } from "./AccountMenu";
 import { BackendStatus } from "./BackendStatus";
 
+const navItems = [
+  { to: "/search", label: "Search" },
+  { to: "/history", label: "History" },
+  { to: "/compare", label: "Compare" },
+];
+
 export function Layout() {
   const { user, signOut, isConfigured } = useAuth();
   return (
@@ -13,34 +19,21 @@ export function Layout() {
         <div className="topbar-inner">
           <div className="brand-lockup">
             <span className="brand-mark" aria-hidden="true">IM</span>
-            <div className="brand-copy">
-              <span className="brand-name">Influencer Matcher</span>
-              <span className="brand-context">Creator intelligence desk</span>
-            </div>
+            <span className="brand-name">Influencer Matcher</span>
           </div>
           <nav className="main-nav" aria-label="Primary navigation">
-            <NavLink to="/search" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
-              <span className="nav-index">01</span>Search
-            </NavLink>
-            <NavLink to="/history" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
-              <span className="nav-index">02</span>History
-            </NavLink>
-            <NavLink to="/compare" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
-              <span className="nav-index">03</span>Compare
-            </NavLink>
+            {navItems.map((item) => (
+              <NavLink key={item.to} to={item.to} className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+                {item.label}
+              </NavLink>
+            ))}
           </nav>
           <div className="account-slot">
-            {import.meta.env.VITE_DEMO_MODE === "true" && <BackendStatus />}
+            <BackendStatus />
             {isConfigured && user && <AccountMenu user={user} signOut={signOut} />}
           </div>
         </div>
       </header>
-      {import.meta.env.VITE_DEMO_MODE === "true" && (
-        <div className="demo-banner" role="status">
-          <strong>Personal project demo</strong>
-          <span>Free-tier hosting may sleep between visits; completed runs remain saved.</span>
-        </div>
-      )}
       <main id="main-content" className="page-content">
         <Outlet />
       </main>

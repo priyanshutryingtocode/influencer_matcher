@@ -1,9 +1,9 @@
 export type FitLevel = "strong" | "partial" | "weak" | "unknown";
-export type RankingSource = "llm" | "filled" | "fallback";
+export type RankingSource = "llm" | "llm_unverified" | "filled" | "fallback";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
 export interface Brief {
-  niche: string;
+  goal: string;
   platform: string;
   audience: string;
   vibe: string;
@@ -26,13 +26,18 @@ export interface MatchJob {
   updated_at: string;
 }
 
+export interface Grounding {
+  /** Key of a profile field on the stored creator. */
+  field: string;
+  /** Verbatim substring of that field, checked server-side before display. */
+  quote: string;
+}
+
 export interface CreatorSnapshot {
   id: number;
   creator_key: string;
   handle: string;
   name: string;
-  niche: string;
-  secondary_niches: string[];
   platform: string;
   city: string;
   country: string;
@@ -53,6 +58,12 @@ export interface CreatorSnapshot {
   tags: string[];
   bio: string;
   similarity: number | null;
+  /** Stored and displayable, but not quotable in a reason: these are not in
+   *  the embedded profile text, so retrieval never searched on them. */
+  reach_ratio: number;
+  sponsored_ratio: number;
+  growth_trend: string;
+  audience_top_countries: string[];
 }
 
 export interface RankedCreator {
@@ -63,6 +74,12 @@ export interface RankedCreator {
   source: RankingSource;
   rationale: string;
   evidence: string[];
+  /** Citations the server verified against the stored profile. */
+  grounding: Grounding[];
+  /** Why the model did not rank this entry. Prefixed with "daily_quota:" when
+   *  the free ranking budget is spent, which is a different situation from an
+   *  outage and needs different advice. */
+  fallback_reason: string;
 }
 
 export interface Warning {
@@ -74,7 +91,7 @@ export interface Warning {
 
 export interface RunSummary {
   n_results: number;
-  n_ranked_on_niche: number;
+  avg_match_pct: number;
   n_strong: number;
   n_weak: number;
   avg_engagement_pct: number;
@@ -116,9 +133,9 @@ export interface Comparison {
 }
 
 export interface Meta {
-  niches: string[];
   platforms: string[];
   defaults: {
+    goal: string;
     audience: string;
     vibe: string;
     top_k: number;
@@ -129,11 +146,13 @@ export interface Meta {
     top_k_max: number;
     top_n_min: number;
     top_n_max: number;
+    goal_min_length: number;
+    goal_max_length: number;
     audience_max_length: number;
     vibe_max_length: number;
   };
   index: {
-    status: "ready" | "unavailable";
+    status: "ready" | "unavailable" | "reindex_required";
     count: number;
     embedding_model: string;
     embed_dimensions: number;

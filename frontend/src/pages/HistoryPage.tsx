@@ -2,10 +2,14 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, ApiError } from "../api/client";
-import { ResultCard } from "../components/ResultCard";
+import { ErrorNote } from "../components/ErrorNote";
+import { PageIntro } from "../components/PageIntro";
+import { ResultList } from "../components/ResultList";
+import { RunContext } from "../components/RunContext";
 import { SummaryMetrics } from "../components/RunSummary";
 import { WarningBanner } from "../components/WarningBanner";
 import { useRuns } from "../hooks/useRuns";
+import { formatDate } from "../format";
 import type { RunDetail } from "../types";
 
 export function HistoryPage() {
@@ -38,60 +42,48 @@ export function HistoryPage() {
 
   return (
     <section className="page-section">
-      <div className="page-intro">
-        <div>
-          <p className="eyebrow">History / Archive</p>
-          <h1>Saved shortlists</h1>
-          <p className="page-description">A durable record of the briefs you have run and the creators you kept.</p>
-        </div>
-        <div className="page-intro-meta">
-          <span className="page-index">Archive / 02</span>
-          <button className="secondary-button" type="button" onClick={() => void refresh()}>Refresh</button>
-        </div>
-      </div>
+      <PageIntro
+        eyebrow="History / Archive"
+        title="Saved shortlists"
+        description="A durable record of the briefs you have run and the creators you kept."
+        meta={<button className="btn btn-secondary" type="button" onClick={() => void refresh()}>Refresh</button>}
+      />
 
-      {(error || detailError) && <div className="system-note system-note-error" role="alert"><span className="system-note-signal" aria-hidden="true" /><strong>Archive issue</strong><span>{error ?? detailError}</span></div>}
+      {(error || detailError) && <ErrorNote title="Archive issue">{error ?? detailError}</ErrorNote>}
       {isLoading && <LoadingLedger />}
 
       <div className="history-layout">
         <aside className="history-ledger">
-          <div className="ledger-heading"><span>Saved runs</span><span>{items.length}</span></div>
+          <div className="ledger-heading"><span>Saved runs</span></div>
           <div className="history-list">
             {!isLoading && !items.length && <div className="empty-ledger"><p>No saved shortlists yet.</p><Link to="/search">Run a match <span aria-hidden="true">→</span></Link></div>}
             {items.map((item) => (
               <article className={`history-row ${selected?.run_id === item.run_id ? "history-row-active" : ""}`} key={item.run_id}>
                 <button className="history-open" type="button" aria-current={selected?.run_id === item.run_id ? "true" : undefined} onClick={() => void openRun(item.run_id)}>
                   <span className="history-date">{formatDate(item.created_at)}</span>
-                  <strong>{item.brief.niche} <span>/</span> {item.brief.platform}</strong>
+                  <strong className="history-goal">{item.brief.goal}</strong>
                   <span className="history-meta">{item.n_results} results <i /> {item.n_strong} strong {item.has_warnings && <b>Notes</b>}</span>
                 </button>
-                <button className="delete-button" type="button" aria-label={`Delete ${item.brief.niche} run`} onClick={() => void deleteRun(item.run_id)}>Delete</button>
+                <button className="btn btn-ghost btn-danger-ghost delete-button" type="button" aria-label={`Delete run: ${item.brief.goal}`} onClick={() => void deleteRun(item.run_id)}>Delete</button>
               </article>
             ))}
-            {hasMore && <button className="text-button full-width" type="button" disabled={isLoadingMore} onClick={() => void loadMore()}>{isLoadingMore ? "Loading..." : "Load older runs"}</button>}
+            {hasMore && <button className="btn btn-ghost full-width" type="button" disabled={isLoadingMore} onClick={() => void loadMore()}>{isLoadingMore ? "Loading..." : "Load older runs"}</button>}
           </div>
         </aside>
 
         <div className="history-detail">
-          {isOpening && <div className="empty-state"><span className="empty-index">LOADING</span><h2>Opening shortlist</h2></div>}
+          {isOpening && <div className="empty-state"><h2>Opening shortlist</h2></div>}
           {!isOpening && selected && (
             <>
-              <div className="run-context">
-                <div>
-                  <p className="eyebrow">Run detail / {formatDate(selected.created_at)}</p>
-                  <h2>{selected.brief.niche} <span>·</span> {selected.brief.platform}</h2>
-                  <p className="run-context-line">{selected.brief.audience || "General audience"} <span>/</span> {selected.brief.vibe || "Versatile tone"}</p>
-                </div>
-                <button className="secondary-button" type="button" onClick={() => void api.downloadRun(selected.run_id).catch((caught) => setDetailError(caught instanceof ApiError ? caught.message : "Could not export the run."))}>Export CSV</button>
-              </div>
+              <RunContext
+                brief={selected.brief}
+                createdAt={selected.created_at}
+                label="Run detail"
+                onExport={() => void api.downloadRun(selected.run_id).catch((caught) => setDetailError(caught instanceof ApiError ? caught.message : "Could not export the run."))}
+              />
               <WarningBanner warnings={selected.warnings} />
               <SummaryMetrics summary={selected.summary} compact />
-              <div className="result-list">
-                {selected.ranked.map((entry) => {
-                  const creator = selected.candidates.find((item) => item.id === entry.id);
-                  return creator ? <ResultCard key={entry.id} creator={creator} entry={entry} brief={selected.brief} /> : null;
-                })}
-              </div>
+              <ResultList run={selected} />
             </>
           )}
           {!isOpening && !selected && <div className="empty-state"><span className="empty-index">SELECT</span><h2>Choose a saved run</h2><p>Open a shortlist to inspect its ranked creators and export the result.</p></div>}
@@ -103,8 +95,4 @@ export function HistoryPage() {
 
 function LoadingLedger() {
   return <div className="skeleton-ledger"><span /><span /><span /></div>;
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }

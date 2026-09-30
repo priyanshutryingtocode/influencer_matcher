@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../api/client";
-import { ResultCard } from "../components/ResultCard";
+import { ErrorNote } from "../components/ErrorNote";
+import { PageIntro } from "../components/PageIntro";
+import { ResultList } from "../components/ResultList";
 import { SummaryMetrics } from "../components/RunSummary";
+import { formatDate } from "../format";
 import type { Comparison, RunDetail, RunListItem } from "../types";
 
 export function ComparePage() {
@@ -69,19 +72,16 @@ export function ComparePage() {
 
   return (
     <section className="page-section">
-      <div className="page-intro">
-        <div>
-          <p className="eyebrow">Compare / Analysis</p>
-          <h1>Put two shortlists side by side.</h1>
-          <p className="page-description">See what stayed, what changed, and where the quality moved.</p>
-        </div>
-        <span className="page-index">Analysis / 03</span>
-      </div>
-      {error && <div className="system-note system-note-error" role="alert"><span className="system-note-signal" aria-hidden="true" /><strong>Comparison issue</strong><span>{error}</span></div>}
+      <PageIntro
+        eyebrow="Compare / Analysis"
+        title="Put two shortlists side by side."
+        description="See what stayed, what changed, and where the quality moved."
+      />
+      {error && <ErrorNote title="Comparison issue">{error}</ErrorNote>}
 
       <div className="compare-toolbar">
         <RunSelect label="Run A" value={runA} runs={runs} onChange={setRunA} />
-        <button className="swap-button" type="button" onClick={swapRuns} aria-label="Swap runs">Swap <span aria-hidden="true">↔</span></button>
+        <button className="btn btn-ghost swap-button" type="button" onClick={swapRuns} aria-label="Swap runs">Swap <span aria-hidden="true">↔</span></button>
         <RunSelect label="Run B" value={runB} runs={runs} onChange={setRunB} />
       </div>
 
@@ -140,7 +140,7 @@ function OverlapList({ comparison, details }: { comparison: Comparison; details:
   if (!comparison.shared_creators.length) return <div className="system-note system-note-info" role="status"><span className="system-note-signal" aria-hidden="true" /><strong>No overlap</strong><span>These runs do not share a ranked creator.</span></div>;
   return (
     <div className="overlap-list">
-      <div className="section-heading compact"><div><p className="eyebrow">Overlap</p><h2>Creators in both runs</h2></div><span className="page-index">{comparison.shared_creators.length} shared</span></div>
+      <div className="section-heading compact"><div><p className="eyebrow">Overlap</p><h2>Creators in both runs</h2></div><span className="section-count">{comparison.shared_creators.length} shared</span></div>
       <div className="overlap-items">
         {comparison.shared_creators.map((creator) => (
           <div className="overlap-item" key={creator.creator_key}>
@@ -156,16 +156,11 @@ function OverlapList({ comparison, details }: { comparison: Comparison; details:
 function CompareColumn({ title, detail, summary, sharedKeys }: { title: string; detail: RunDetail | null; summary: Comparison["summary_a"]; sharedKeys: Set<string> }) {
   return (
     <div className="compare-column">
-      <div className="compare-column-heading"><span className="eyebrow">{title}</span>{detail && <span>{detail.brief.niche} / {detail.brief.platform}</span>}</div>
+      <div className="compare-column-heading"><span className="eyebrow">{title}</span>{detail && <span>{detail.brief.goal}</span>}</div>
       <SummaryMetrics summary={summary} compact />
-      {detail ? (
-        <div className="result-list compare-result-list">
-          {detail.ranked.map((entry) => {
-            const creator = detail.candidates.find((item) => item.id === entry.id);
-            return creator ? <ResultCard key={entry.id} creator={creator} entry={entry} brief={detail.brief} highlight={sharedKeys.has(creator.creator_key)} /> : null;
-          })}
-        </div>
-      ) : <div className="empty-ledger">No run details loaded.</div>}
+      {detail
+        ? <ResultList run={detail} highlightKeys={sharedKeys} className="compare-result-list" />
+        : <div className="empty-ledger">No run details loaded.</div>}
     </div>
   );
 }
@@ -175,9 +170,5 @@ function rankFor(detail: RunDetail | null, creatorId: number) {
 }
 
 function labelFor(run: RunListItem): string {
-  return `${formatDate(run.created_at)} · ${run.brief.niche} · ${run.brief.platform}`;
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return `${formatDate(run.created_at)} · ${run.brief.goal}`;
 }

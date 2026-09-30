@@ -12,7 +12,20 @@ import type {
 const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const isLocalHost = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
 export const isApiConfigured = Boolean(baseUrl) || (import.meta.env.DEV && isLocalHost);
-export const backendWakeTimeoutMs = 120_000;
+/** Cold-start budget for waking a sleeping free-tier service. */
+const backendWakeTimeoutMs = 120_000;
+/** A local API answers in milliseconds, so a long wait there is always a
+ *  misconfiguration rather than a cold start. */
+export const localWakeTimeoutMs = 10_000;
+
+function wakeTimeoutMs(): number {
+  return import.meta.env.DEV ? localWakeTimeoutMs : backendWakeTimeoutMs;
+}
+
+function apiTargetLabel(): string {
+  return baseUrl || "the Vite dev proxy";
+}
+
 
 export class ApiError extends Error {
   readonly status: number;
@@ -57,21 +70,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-async function probeBackend(timeoutMs = backendWakeTimeoutMs): Promise<void> {
+async function probeBackend(timeoutMs = wakeTimeoutMs()): Promise<void> {
   if (import.meta.env.PROD && !isApiConfigured) {
     throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
   }
+  const target = apiTargetLabel();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${baseUrl}/health/live`, { signal: controller.signal });
-    if (!response.ok) throw new ApiError("The backend responded with an error.", response.status, null);
+    if (!response.ok) throw new ApiError(`The backend at ${target} responded with an error.`, response.status, null);
   } catch (error) {
     if (error instanceof ApiError) throw error;
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError("The backend took too long to start. Try again in a moment.", 408, null);
+      throw new ApiError(
+        `The backend at ${target} did not respond within ${Math.round(timeoutMs / 1000)}s. Is it running?`,
+        408,
+        null,
+      );
     }
-    throw new ApiError("The backend could not be reached.", 0, null);
+    throw new ApiError(`The backend at ${target} could not be reached. Is it running?`, 0, null);
   } finally {
     clearTimeout(timer);
   }

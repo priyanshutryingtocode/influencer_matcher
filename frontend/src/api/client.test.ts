@@ -38,9 +38,29 @@ describe("api.probeBackend", () => {
     );
 
     const pending = api.probeBackend();
-    const assertion = expect(pending).rejects.toThrow(/too long to start/);
-    await vi.advanceTimersByTimeAsync(120_000);
+    const assertion = expect(pending).rejects.toThrow(/did not respond within \d+s/);
+    // Well past both the local and production budgets, so the test holds
+    // whichever one the environment resolves to.
+    await vi.advanceTimersByTimeAsync(200_000);
 
+    await assertion;
+  });
+
+  it("names the configured backend in its failure message", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+          }),
+      ),
+    );
+
+    const pending = api.probeBackend();
+    const assertion = expect(pending).rejects.toThrow(/The backend at .* did not respond/);
+    await vi.advanceTimersByTimeAsync(200_000);
     await assertion;
   });
 });

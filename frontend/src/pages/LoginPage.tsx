@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 
+import { ErrorNote } from "../components/ErrorNote";
 import { useAuth } from "../auth/AuthProvider";
 
 type AuthMode = "signin" | "signup";
@@ -72,16 +73,14 @@ export function LoginPage() {
     <main className="auth-page">
       <section className="auth-card">
         <p className="eyebrow">Influencer Matcher</p>
-        <h1>{mode === "signin" ? "Sign in to your desk." : "Create your account."}</h1>
+        <h1>{mode === "signin" ? "Sign in." : "Create your account."}</h1>
         <p className="page-description">
-          {mode === "signin" ? "Use the email and password for your demo account." : "Your account and run history are isolated by your Supabase user ID."}
+          {mode === "signin" ? "Use the email and password for your account." : "Your account and run history are unique per user ID."}
         </p>
         {!isConfigured ? (
-          <div className="system-note system-note-error" role="alert">
-            <span className="system-note-signal" aria-hidden="true" />
-            <strong>Auth not configured</strong>
-            <span>Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the frontend environment.</span>
-          </div>
+          <ErrorNote title="Auth not configured">
+            Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the frontend environment.
+          </ErrorNote>
         ) : (
           <>
             <div className="auth-mode-switch" role="group" aria-label="Account access">
@@ -109,7 +108,7 @@ export function LoginPage() {
                   <input type="password" required minLength={minimumPasswordLength} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Repeat your password" />
                 </label>
               )}
-              <button className="primary-button" type="submit" disabled={isSubmitting}>
+              <button className="btn btn-primary" type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Working..." : mode === "signin" ? "Sign in to account" : "Create account"}
               </button>
               {message && <p className="auth-message">{message}</p>}
@@ -122,7 +121,7 @@ export function LoginPage() {
   );
 }
 
-export function authErrorMessage(caught: unknown, fallback: string): string {
+function authErrorMessage(caught: unknown, fallback: string): string {
   if (caught instanceof Error && caught.message.trim()) return caught.message;
   if (typeof caught === "string" && caught.trim()) return caught;
   if (caught && typeof caught === "object" && "message" in caught) {

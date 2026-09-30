@@ -5,6 +5,12 @@ import type { Brief, MatchJob, MatchParams } from "../types";
 
 const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
 const maxPollDurationMs = 15 * 60 * 1000;
+/** The API can drop a connection while a free-tier instance sleeps or
+ *  restarts, which is not the same as the match failing. A few consecutive
+ *  poll errors are tolerated so a transient blip does not throw away a run
+ *  the server already finished. */
+const maxPollErrors = 3;
+const pollErrorBackoffMs = [1_000, 2_000, 4_000];
 
 export function useMatchJob() {
   const [job, setJob] = useState<MatchJob | null>(null);
@@ -28,12 +34,20 @@ export function useMatchJob() {
       let current = await api.createMatchJob(brief, params);
       if (!mountedRef.current || sequence !== sequenceRef.current) return;
       setJob(current);
+      let pollErrors = 0;
       while (!terminalStatuses.has(current.status)) {
         if (Date.now() - startedAt > maxPollDurationMs) {
           throw new Error("The match is taking too long. Please try again shortly.");
         }
         await wait(1200);
-        current = await api.getMatchJob(current.job_id);
+        try {
+          current = await api.getMatchJob(current.job_id);
+          pollErrors = 0;
+        } catch (caught) {
+          pollErrors += 1;
+          if (pollErrors >= maxPollErrors) throw caught;
+          await wait(pollErrorBackoffMs[Math.min(pollErrors - 1, pollErrorBackoffMs.length - 1)]);
+        }
         if (!mountedRef.current || sequence !== sequenceRef.current) return;
         setJob(current);
       }

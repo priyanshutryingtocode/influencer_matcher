@@ -1,17 +1,15 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { ResultCard } from "./ResultCard";
 import type { Brief, CreatorSnapshot, RankedCreator } from "../types";
 
-const brief: Brief = { niche: "Fitness", platform: "TikTok", audience: "millennials", vibe: "high energy" };
+const brief: Brief = { goal: "high-energy strength training for beginners", platform: "TikTok", audience: "", vibe: "" };
 const creator: CreatorSnapshot = {
   id: 1,
   creator_key: "TikTok:@fit1",
   handle: "@fit1",
   name: "Fit One",
-  niche: "Fitness",
-  secondary_niches: [],
   platform: "TikTok",
   city: "Austin",
   country: "USA",
@@ -29,9 +27,13 @@ const creator: CreatorSnapshot = {
   audience_gender: "55% Female",
   audience_country: "USA",
   brand_collaborations: ["Nike"],
-  tags: ["gym"],
+  tags: ["gym", "lifting", "protein", "extra", "cut"],
   bio: "Lifting daily.",
   similarity: 0.91,
+  reach_ratio: 0.62,
+  sponsored_ratio: 0.08,
+  growth_trend: "rising",
+  audience_top_countries: ["USA", "Canada"],
 };
 const entry: RankedCreator = {
   id: 1,
@@ -39,16 +41,123 @@ const entry: RankedCreator = {
   rank: 1,
   fit: "strong",
   source: "llm",
-  rationale: "Direct niche match.",
-  evidence: ["Exact niche match"],
+  rationale: "Trains at home for beginners.",
+  evidence: ["Brief terms found in profile: gym"],
+  grounding: [{ field: "tags", quote: "gym" }],
+  fallback_reason: "",
 };
 
 describe("ResultCard", () => {
-  it("renders a ranked ledger row with provenance", () => {
+  afterEach(cleanup);
+
+  it("renders the rank, identity, fit and evidence", () => {
     render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
     expect(screen.getByText("01")).toBeTruthy();
     expect(screen.getByText("@fit1")).toBeTruthy();
-    expect(screen.getByText("Gemini ranked")).toBeTruthy();
-    expect(screen.getByText("Evidence")).toBeTruthy();
+    expect(screen.getByText("Strong")).toBeTruthy();
+    expect(screen.getByText("Profile details")).toBeTruthy();
+  });
+
+  it("puts the similarity beside the fit label instead of a third metric", () => {
+    render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
+    expect(screen.getByText("91.0%")).toBeTruthy();
+    expect(screen.queryByText("Match")).toBeNull();
+  });
+
+  it("does not label rows that were normally ranked", () => {
+    render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
+    expect(screen.queryByText("Gemini ranked")).toBeNull();
+  });
+
+  it("shows the reason's citations beside the field they came from", () => {
+    const { container } = render(
+      <ResultCard
+        creator={creator}
+        entry={{ ...entry, grounding: [
+          { field: "tags", quote: "gym" },
+          { field: "brand_collaborations", quote: "Nike" },
+        ] }}
+        brief={brief}
+      />,
+    );
+
+    expect(screen.getByText("Topics")).toBeTruthy();
+    expect(screen.getByText("Brand partners")).toBeTruthy();
+    // The quote must be visible without expanding anything.
+    expect(container.textContent).toContain("Nike");
+  });
+
+  it("marks a reason the server could not confirm", () => {
+    render(
+      <ResultCard
+        creator={creator}
+        entry={{ ...entry, source: "llm_unverified", grounding: [], rationale: "Retrieved for profile similarity." }}
+        brief={brief}
+      />,
+    );
+
+    expect(screen.getByText("Reason not confirmed")).toBeTruthy();
+    expect(screen.getByText("Retrieved for profile similarity.")).toBeTruthy();
+  });
+
+  it("explains a row that came from a fallback", () => {
+    render(<ResultCard creator={creator} entry={{ ...entry, source: "fallback" }} brief={brief} />);
+
+    expect(screen.getByText("Retrieval fallback")).toBeTruthy();
+  });
+
+  it("omits missing attributes instead of printing filler text", () => {
+    const sparse: CreatorSnapshot = {
+      ...creator,
+      city: "",
+      content_style: "",
+      language: "",
+      audience_age: "",
+      audience_gender: "",
+      brand_collaborations: [],
+      tags: [],
+    };
+    const { container } = render(<ResultCard creator={sparse} entry={entry} brief={brief} />);
+
+    expect(container.textContent).not.toMatch(/unavailable|unknown/i);
+  });
+
+  it("caps the tag list so the row stays scannable", () => {
+    render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
+    expect(screen.getByText(/gym\s+·\s+lifting\s+·\s+protein/)).toBeTruthy();
+    expect(screen.queryByText(/extra/)).toBeNull();
+  });
+
+  it("shows reach, sponsorship and growth in the details panel", () => {
+    const { container } = render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
+    // Reach as a share of followers is the check a brand actually wants.
+    expect(container.textContent).toContain("Reach vs followers: 62%");
+    expect(container.textContent).toContain("Sponsored: 8%");
+    expect(container.textContent).toContain("Growth: rising");
+  });
+
+  it("omits signals that are absent rather than showing zero", () => {
+    const { container } = render(
+      <ResultCard
+        creator={{ ...creator, reach_ratio: 0, sponsored_ratio: 0, growth_trend: "", audience_top_countries: [] }}
+        entry={entry}
+        brief={brief}
+      />,
+    );
+
+    expect(container.textContent).not.toContain("Reach vs followers");
+    expect(container.textContent).not.toContain("Sponsored");
+    expect(container.textContent).not.toContain("Growth:");
+  });
+
+  it("renders a dash when similarity is unknown", () => {
+    render(<ResultCard creator={{ ...creator, similarity: null }} entry={entry} brief={brief} />);
+
+    expect(screen.getByText("—")).toBeTruthy();
   });
 });

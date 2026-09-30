@@ -1,5 +1,11 @@
 import type { RunSummary } from "../types";
 
+export const SIMILARITY_EXPLANATION =
+  "Mean cosine similarity between the brief's embedding and each shortlisted "
+  + "creator's. This is an embedding distance, not a fit score: it is useful for "
+  + "comparing one brief against another, but it does not reliably rank creators "
+  + "within a single shortlist. Use the strong-fit count for that.";
+
 export function SummaryMetrics({ summary, compact = false }: { summary: RunSummary; compact?: boolean }) {
   return (
     <dl className={`summary-strip ${compact ? "summary-strip-compact" : ""}`}>
@@ -8,8 +14,8 @@ export function SummaryMetrics({ summary, compact = false }: { summary: RunSumma
         <dd><strong>{summary.n_strong}/{summary.n_results}</strong><span>strong fits</span></dd>
       </div>
       <div className="summary-item">
-        <dt>On niche</dt>
-        <dd><strong>{summary.n_ranked_on_niche}</strong><span>of {summary.n_results}</span></dd>
+        <dt title={SIMILARITY_EXPLANATION}>Avg similarity</dt>
+        <dd title={SIMILARITY_EXPLANATION}><strong>{summary.avg_match_pct.toFixed(1)}%</strong><span>cosine vs. brief</span></dd>
       </div>
       <div className="summary-item">
         <dt>Avg engagement</dt>

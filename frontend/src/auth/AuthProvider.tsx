@@ -4,7 +4,7 @@ import type { Session, User } from "@supabase/supabase-js";
 
 import { isAuthConfigured, supabase } from "../lib/supabase";
 
-export interface SignUpCredentials {
+interface SignUpCredentials {
   displayName: string;
   email: string;
   password: string;

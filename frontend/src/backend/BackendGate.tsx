@@ -14,7 +14,7 @@ export function BackendGate() {
         </p>
         <button
           type="button"
-          className="primary-button backend-gate-button"
+          className="btn btn-primary btn-block backend-gate-button"
           onClick={() => void wake()}
           disabled={isWaking}
         >

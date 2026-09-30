@@ -82,7 +82,7 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
   );
 }
 
-export function getAccountIdentity(user: User): AccountIdentity {
+function getAccountIdentity(user: User): AccountIdentity {
   const metadataName = user.user_metadata?.display_name;
   const email = typeof user.email === "string" && user.email.trim() ? user.email.trim() : "Signed in";
   const displayName = typeof metadataName === "string" && metadataName.trim()
