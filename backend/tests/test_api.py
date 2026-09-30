@@ -69,18 +69,16 @@ class MemoryJobManager:
 
 def make_result():
     brief = Brief(
-        niche="Fitness",
+        goal="high-energy strength training for busy millennials",
         platform="TikTok",
-        audience="busy millennials",
-        vibe="high energy",
+        audience="",
+        vibe="",
     )
     candidates = [
         Influencer(
             id=1,
             handle="@fit1",
             name="Fit One",
-            niche="Fitness",
-            secondary_niches=[],
             platform="TikTok",
             city="Austin",
             country="USA",
@@ -95,8 +93,6 @@ def make_result():
             id=2,
             handle="@fit2",
             name="Fit Two",
-            niche="Yoga",
-            secondary_niches=["Fitness"],
             platform="TikTok",
             city="Austin",
             country="USA",
@@ -123,7 +119,7 @@ def test_job_manager_persists_match():
         matcher=lambda job_id, brief, params: make_result(),
         indexed_count_provider=lambda: 10,
     )
-    response = manager.submit(Brief(niche="Fitness", platform="TikTok"), MatchParams(top_k=2, top_n=1))
+    response = manager.submit(Brief(goal="high-energy strength training for beginners", platform="TikTok"), MatchParams(top_k=2, top_n=1))
     for _ in range(50):
         current = manager.get(response.job_id)
         if current.status in {"succeeded", "failed"}:
@@ -145,19 +141,25 @@ def test_api_health_meta_and_match_job():
         indexed_count=10,
     )
     with TestClient(app) as client:
-        assert client.get("/health/live").json() == {"status": "ok"}
+        live = client.get("/health/live").json()
+        assert live["status"] == "ok"
+        assert live["memory_rss_mb"] is None or live["memory_rss_mb"] > 0
         assert client.get("/health/ready").status_code == 200
         meta = client.get("/api/v1/meta")
         assert meta.status_code == 200
-        assert "Fitness" in meta.json()["niches"]
+        assert "TikTok" in meta.json()["platforms"]
+        assert "niches" not in meta.json()
+        # The key has to be present even though it is empty. When it was
+        # omitted, the Search page read undefined and called .trim() on it.
+        assert meta.json()["defaults"]["goal"] == ""
         response = client.post(
             "/api/v1/match-jobs",
             json={
                 "brief": {
-                    "niche": "Fitness",
+                    "goal": "high-energy strength training for busy millennials",
                     "platform": "TikTok",
-                    "audience": "millennials",
-                    "vibe": "high energy",
+                    "audience": "",
+                    "vibe": "",
                 },
                 "params": {"top_k": 10, "top_n": 5},
             },
@@ -214,7 +216,7 @@ def test_api_normalizes_request_validation_errors():
         response = client.post(
             "/api/v1/match-jobs",
             json={
-                "brief": {"niche": "Fitness", "platform": "Any"},
+                "brief": {"goal": "at-home strength training for gen z", "platform": "Any"},
                 "params": {"top_k": 2, "top_n": 3},
             },
         )
@@ -223,7 +225,8 @@ def test_api_normalizes_request_validation_errors():
         assert "top_n" in response.json()["detail"]["message"]
 
 
-def test_api_rejects_invalid_brief_when_not_ready():
+def test_api_rejects_thin_goal_and_reports_index_not_ready():
+    """Free text means there is no taxonomy to violate, only length to check."""
     app = create_app(
         repository=MemoryRepository(),
         job_manager=MemoryJobManager(),
@@ -233,13 +236,13 @@ def test_api_rejects_invalid_brief_when_not_ready():
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/match-jobs",
-            json={"brief": {"niche": "Not a niche", "platform": "Any"}},
+            json={"brief": {"goal": "yoga", "platform": "Any"}},
         )
         assert response.status_code == 422
-        assert response.json()["detail"]["code"] == "INVALID_NICHE"
+        assert response.json()["detail"]["code"] == "GOAL_TOO_SHORT"
         ready_response = client.post(
             "/api/v1/match-jobs",
-            json={"brief": {"niche": "Fitness", "platform": "Any"}},
+            json={"brief": {"goal": "a thrifted-vintage clothing label for Gen Z", "platform": "Any"}},
         )
         assert ready_response.status_code == 503
         assert ready_response.json()["detail"]["code"] == "INDEX_NOT_READY"
@@ -261,10 +264,9 @@ def test_demo_ip_rate_limit_blocks_repeated_matches(monkeypatch):
         job_manager=MemoryJobManager(),
         initialize_database=False,
         indexed_count=10,
-        job_backend="memory",
     )
     payload = {
-        "brief": {"niche": "Fitness", "platform": "Any", "audience": "Gen Z", "vibe": "warm"},
+        "brief": {"goal": "at-home strength training for Gen Z", "platform": "Any", "audience": "", "vibe": "warm"},
         "params": {"top_k": 3, "top_n": 1},
     }
     token = jwt.encode(

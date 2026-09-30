@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from statistics import median
 from uuid import UUID
 
-from src.formatting import match_evidence, niche_coverage
+from src import config
+from src.formatting import match_evidence
 from src.models import Brief, Influencer
+from src.ranking import QUOTA_REASON_TAG
 
 from .schemas.models import (
     BriefPayload,
@@ -21,7 +22,7 @@ from .schemas.models import (
 
 def brief_to_payload(brief: Brief) -> dict:
     return BriefPayload(
-        niche=brief.niche,
+        goal=brief.goal,
         platform=brief.platform,
         audience=brief.audience,
         vibe=brief.vibe,
@@ -34,8 +35,6 @@ def creator_to_snapshot(influencer: Influencer) -> dict:
         creator_key=_creator_key(influencer),
         handle=influencer.handle,
         name=influencer.name,
-        niche=influencer.niche,
-        secondary_niches=influencer.secondary_niches,
         platform=influencer.platform,
         city=influencer.city,
         country=influencer.country,
@@ -56,6 +55,10 @@ def creator_to_snapshot(influencer: Influencer) -> dict:
         tags=influencer.tags,
         bio=influencer.bio,
         similarity=influencer.similarity,
+        reach_ratio=influencer.reach_ratio,
+        sponsored_ratio=influencer.sponsored_ratio,
+        growth_trend=influencer.growth_trend,
+        audience_top_countries=influencer.audience_top_countries,
     ).model_dump(mode="json")
 
 
@@ -73,6 +76,8 @@ def ranked_to_snapshot(
         source=entry.get("source", "filled"),
         rationale=entry.get("rationale", ""),
         evidence=match_evidence(brief, influencer),
+        grounding=entry.get("grounding", []),
+        fallback_reason=entry.get("fallback_reason", ""),
     ).model_dump(mode="json")
 
 
@@ -82,22 +87,26 @@ def build_warnings(
     ranked: list[dict],
 ) -> list[dict]:
     warnings: list[Warning] = []
-    matches, total = niche_coverage(candidates, brief.niche)
-    if total and matches < total:
-        warnings.append(
-            Warning(
-                code="LOW_NICHE_COVERAGE",
-                severity="warning",
-                message=f"Only {matches}/{total} retrieved creators are tagged {brief.niche}.",
-                details={"matches": matches, "retrieved": total},
+    fallback = [item for item in ranked if item.get("source") == "fallback"]
+    if fallback:
+        reason = next((item.get("fallback_reason", "") for item in fallback if item.get("fallback_reason")), "")
+        is_quota = reason.startswith(QUOTA_REASON_TAG)
+        if is_quota:
+            # "Unavailable" would read as an outage, and the sensible response
+            # to an outage is to retry immediately -- which cannot help here.
+            # Say what actually happened and when it changes.
+            message = (
+                "Today's free ranking quota is spent, so these are in retrieval order "
+                "rather than ranked. It resets at midnight Pacific."
             )
-        )
-    if any(item.get("source") == "fallback" for item in ranked):
+        else:
+            message = "Gemini ranking was unavailable; showing retrieval order."
         warnings.append(
             Warning(
                 code="RANKING_FALLBACK",
                 severity="error",
-                message="Gemini ranking was unavailable; showing retrieval order.",
+                message=message,
+                details={"reason": reason} if reason else {},
             )
         )
     elif any(item.get("source") == "filled" for item in ranked):
@@ -116,9 +125,10 @@ def build_warnings(
 def build_summary(candidates: list[Influencer], ranked: list[dict], brief: Brief) -> dict:
     by_id = {candidate.id: candidate for candidate in candidates}
     ranked_candidates = [by_id[item["id"]] for item in ranked if item.get("id") in by_id]
+    similarities = [item.similarity for item in ranked_candidates if item.similarity is not None]
     return RunSummary(
         n_results=len(ranked_candidates),
-        n_ranked_on_niche=sum(item.niche == brief.niche for item in ranked_candidates),
+        avg_match_pct=round(100 * (sum(similarities) / len(similarities)), 1) if similarities else 0.0,
         n_strong=sum(item.get("fit") == "strong" for item in ranked),
         n_weak=sum(item.get("fit") == "weak" for item in ranked),
         avg_engagement_pct=(
@@ -147,9 +157,9 @@ def build_run_record(result: dict, run_id: UUID, indexed_count: int | None = Non
         "brief": brief_to_payload(brief),
         "params": MatchParams(**params).model_dump(mode="json"),
         "pipeline": {
-            "embedding_model": _config_value("LOCAL_EMBED_MODEL"),
-            "embed_dimensions": _config_value("EMBED_DIMENSIONS"),
-            "gemini_model": _config_value("GEN_MODEL"),
+            "embedding_model": config.EMBED_MODEL,
+            "embed_dimensions": config.EMBED_DIMENSIONS,
+            "gemini_model": config.GEN_MODEL,
             "indexed_creator_count": indexed_count,
         },
         "result": {
@@ -217,13 +227,3 @@ def run_list_item(record: dict) -> RunListItem:
 
 def _creator_key(influencer: Influencer) -> str:
     return f"{influencer.platform}:{influencer.handle}"
-
-
-def _config_value(name: str):
-    from src import config
-
-    return getattr(config, name)
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)

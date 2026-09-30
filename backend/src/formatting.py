@@ -1,14 +1,8 @@
 """Display helpers, kept separate from pipeline logic so they're easy to
 swap out (e.g. if you later render results in a web UI instead of stdout)."""
 
-import re
-
 from .models import Brief, Influencer
-
-STOP_WORDS = {
-    "about", "and", "are", "for", "from", "into", "its", "not", "the",
-    "this", "that", "their", "with", "your",
-}
+from .text_match import shared_terms, terms
 
 
 def format_followers(n: int) -> str:
@@ -19,30 +13,20 @@ def format_followers(n: int) -> str:
     return str(n)
 
 
-def niche_coverage(candidates: list[Influencer], niche: str) -> tuple[int, int]:
-    """How many of the retrieved candidates actually match the requested
-    niche, out of how many were retrieved. A low ratio (especially 0) means
-    the platform filter (or retrieval itself) left little or nothing
-    on-niche to choose from -- worth surfacing, since the ranker will still
-    confidently pick *something* from what's available even if none of it
-    is a good fit."""
-    matches = sum(1 for c in candidates if c.niche == niche)
-    return matches, len(candidates)
-
-
 def match_evidence(brief: Brief, influencer: Influencer) -> list[str]:
-    """Return deterministic profile evidence for a retrieved result."""
+    """Deterministic profile evidence for a retrieved result.
+
+    The LLM's reason is checked against the profile in `src.ranking`; this is
+    the independent backstop shown alongside it, built only from the text the
+    creator was embedded as.
+    """
     evidence: list[str] = []
-    if influencer.niche == brief.niche:
-        evidence.append("Exact niche match")
+    brief_terms = terms(f"{brief.goal} {brief.audience} {brief.vibe}")
+    shared = sorted(shared_terms(brief_terms, influencer))
+    if shared:
+        evidence.append(f"Brief terms found in profile: {', '.join(shared[:5])}")
 
-    brief_terms = _terms(f"{brief.audience} {brief.vibe}")
-    profile_terms = _terms(" ".join([*influencer.tags, influencer.bio]))
-    shared_terms = sorted(brief_terms & profile_terms)
-    if shared_terms:
-        evidence.append(f"Shared brief/profile terms: {', '.join(shared_terms[:4])}")
-
-    matching_tags = [tag for tag in influencer.tags if _terms(tag) & brief_terms]
+    matching_tags = [tag for tag in influencer.tags if terms(tag) & brief_terms]
     if matching_tags:
         evidence.append(f"Relevant profile tags: {', '.join(matching_tags[:3])}")
 
@@ -51,26 +35,15 @@ def match_evidence(brief: Brief, influencer: Influencer) -> list[str]:
     return evidence
 
 
-def _terms(text: str) -> set[str]:
-    return {
-        word for word in re.findall(r"[a-z0-9]+", text.lower())
-        if len(word) > 2 and word not in STOP_WORDS
-    }
-
-
 def print_brief(brief: Brief) -> None:
     print("\nBrief:")
-    print(f"  Niche: {brief.niche} | Platform: {brief.platform}")
+    print(f"  Goal: {brief.goal}")
+    print(f"  Platform: {brief.platform}")
     print(f"  Audience: {brief.audience}")
     print(f"  Vibe: {brief.vibe}")
 
 
 def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], brief: Brief) -> None:
-    matches, total = niche_coverage(list(candidates_by_id.values()), brief.niche)
-    if total and matches < total:
-        print(f"\nHeads up: only {matches}/{total} retrieved candidates are actually tagged '{brief.niche}'.")
-        print("The rest passed your platform filter but didn't match the niche as closely.")
-
     fallback_entries = [e for e in ranked if e.get("source") == "fallback"]
     filled_entries = [e for e in ranked if e.get("source") == "filled"]
     if fallback_entries:
@@ -81,13 +54,15 @@ def print_results(ranked: list[dict], candidates_by_id: dict[int, Influencer], b
             f"slots; the rest were filled from retrieval order (marked [filled] below)."
         )
 
-    print(f"\nTop {len(ranked)} matches (fit is AI-assessed, cross-checked against niche match):\n")
+    print(f"\nTop {len(ranked)} matches (fit is AI-assessed against the brief):\n")
     for i, entry in enumerate(ranked, start=1):
         inf = candidates_by_id[entry["id"]]
         fit_tag = f"[{entry.get('fit', 'unknown')} fit] " if entry.get("fit") else ""
-        print(f"{i}. {fit_tag}{inf.handle}  ({inf.niche}, {inf.platform})")
+        print(f"{i}. {fit_tag}{inf.handle}  ({inf.platform}, {inf.city})")
         print(f"   {format_followers(inf.followers)} followers · {inf.engagement}% engagement")
         if inf.similarity is not None:
             print(f"   Semantic relevance: {inf.similarity:.1%}")
         print(f"   Evidence: {'; '.join(match_evidence(brief, inf))}")
+        for claim in entry.get("grounding", []):
+            print(f"   Grounded in {claim['field']}: \"{claim['quote']}\"")
         print(f"   {entry['rationale']}\n")

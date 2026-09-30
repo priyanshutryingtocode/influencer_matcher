@@ -4,12 +4,13 @@ from statistics import median
 
 
 def summarize_run(run: dict) -> dict:
+    """Recompute a summary only when the stored one predates avg_match_pct."""
     stored_summary = run.get("summary")
     if stored_summary and all(
         key in stored_summary
         for key in (
             "n_results",
-            "n_ranked_on_niche",
+            "avg_match_pct",
             "n_strong",
             "n_weak",
             "avg_engagement_pct",
@@ -19,10 +20,11 @@ def summarize_run(run: dict) -> dict:
         return stored_summary
     candidates = {item["id"]: item for item in run["result"]["candidates"]}
     ranked = [candidates[item["id"]] for item in run["result"]["ranked"] if item["id"] in candidates]
-    brief_niche = run["brief"]["niche"]
+    similarities = [item.get("similarity") for item in ranked]
+    similarities = [value for value in similarities if value is not None]
     return {
         "n_results": len(ranked),
-        "n_ranked_on_niche": sum(item["niche"] == brief_niche for item in ranked),
+        "avg_match_pct": round(100 * (sum(similarities) / len(similarities)), 1) if similarities else 0.0,
         "n_strong": sum(item.get("fit") == "strong" for item in run["result"]["ranked"]),
         "n_weak": sum(item.get("fit") == "weak" for item in run["result"]["ranked"]),
         "avg_engagement_pct": (

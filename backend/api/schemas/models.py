@@ -4,26 +4,40 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from src import config
 
 FitLevel = Literal["strong", "partial", "weak", "unknown"]
-RankingSource = Literal["llm", "filled", "fallback"]
+# `llm_unverified` is an LLM reason that survived with no citation the server
+# could confirm. The UI marks it so a reader knows the claim is unsupported.
+RankingSource = Literal["llm", "llm_unverified", "filled", "fallback"]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
 
 class BriefPayload(BaseModel):
-    niche: str = Field(min_length=1, max_length=100)
+    """A free-text brand brief.
+
+    The length floor lives on the write path (`_validate_brief`), not here, so
+    runs stored before the move to free text - whose "niche" was sometimes a
+    four-character vertical - still validate when they are read back. The
+    `niche` alias keeps those records readable and is dropped on output.
+    """
+
+    goal: str = Field(
+        default="",
+        max_length=config.MAX_GOAL_LENGTH,
+        validation_alias=AliasChoices("goal", "niche"),
+    )
     platform: str = Field(default="Any", min_length=1, max_length=50)
-    audience: str = Field(default="Gen Z", max_length=300)
+    audience: str = Field(default="", max_length=300)
     vibe: str = Field(default="", max_length=500)
 
     def to_domain(self):
         from src.models import Brief
 
         return Brief(
-            niche=self.niche,
+            goal=self.goal,
             platform=self.platform,
             audience=self.audience,
             vibe=self.vibe,
@@ -68,12 +82,18 @@ class MatchJobResponse(BaseModel):
 
 
 class CreatorSnapshot(BaseModel):
+    """A creator as stored on a run.
+
+    Fields 0-16 are what the profile states. From `content_style` down they are
+    inferred signals, which live in their own table and refresh on a different
+    cadence; they are flattened into the snapshot so a stored run stays a
+    complete record of what was known at match time.
+    """
+
     id: int
     creator_key: str
     handle: str
     name: str = ""
-    niche: str
-    secondary_niches: list[str] = Field(default_factory=list)
     platform: str
     city: str
     country: str = ""
@@ -94,6 +114,26 @@ class CreatorSnapshot(BaseModel):
     tags: list[str] = Field(default_factory=list)
     bio: str = ""
     similarity: float | None = None
+    # Stored and displayable, but deliberately not citable: these are not in
+    # corpus_text, so retrieval never searched on them and a reason must not
+    # claim them.
+    reach_ratio: float = 0.0
+    sponsored_ratio: float = 0.0
+    growth_trend: str = ""
+    audience_top_countries: list[str] = Field(default_factory=list)
+
+
+class Grounding(BaseModel):
+    """One claim a ranking reason rests on, and the profile field that backs it.
+
+    `field` is a key of `src.ranking.GROUNDABLE_FIELDS` and `quote` is a
+    verbatim substring of that field on the stored creator. Both are checked
+    server-side before they reach this model, so a client can treat a grounding
+    entry as fact rather than as a model's assertion.
+    """
+
+    field: str
+    quote: str
 
 
 class RankedCreator(BaseModel):
@@ -104,6 +144,12 @@ class RankedCreator(BaseModel):
     source: RankingSource
     rationale: str = ""
     evidence: list[str] = Field(default_factory=list)
+    grounding: list[Grounding] = Field(default_factory=list)
+    # Why the model did not rank this entry, when `source` is a fallback. Kept
+    # on the record rather than only in the log: a run re-read later needs to be
+    # able to say whether ranking was skipped for a spent quota or an outage,
+    # because those call for different advice.
+    fallback_reason: str = ""
 
 
 class Warning(BaseModel):
@@ -115,7 +161,7 @@ class Warning(BaseModel):
 
 class RunSummary(BaseModel):
     n_results: int
-    n_ranked_on_niche: int
+    avg_match_pct: float
     n_strong: int
     n_weak: int
     avg_engagement_pct: float
@@ -167,10 +213,48 @@ class ComparisonResponse(BaseModel):
     shared_creators: list[CreatorReference]
 
 
+class MetaDefaults(BaseModel):
+    """Prefill values the Search form starts from.
+
+    Typed rather than `dict[str, Any]`. That was the defect that let a missing
+    `goal` key ship: the frontend type promised it, the backend silently omitted
+    it, and neither side noticed because a dict validates nothing.
+    """
+
+    goal: str = ""
+    audience: str = ""
+    vibe: str = ""
+    top_k: int = config.DEFAULT_TOP_K_RETRIEVAL
+    top_n: int = config.DEFAULT_TOP_N_RANKED
+
+
+class MetaLimits(BaseModel):
+    top_k_min: int
+    top_k_max: int
+    top_n_min: int
+    top_n_max: int
+    goal_min_length: int
+    goal_max_length: int
+    audience_max_length: int
+    vibe_max_length: int
+
+
+class MetaIndex(BaseModel):
+    status: Literal["ready", "unavailable", "reindex_required"]
+    count: int
+    embedding_model: str
+    embed_dimensions: int
+    memory_rss_mb: float | None = None
+
+
+class MetaRanking(BaseModel):
+    model: str
+    fit_levels: list[FitLevel]
+
+
 class MetaResponse(BaseModel):
-    niches: list[str]
     platforms: list[str]
-    defaults: dict[str, Any]
-    limits: dict[str, Any]
-    index: dict[str, Any]
-    ranking: dict[str, Any]
+    defaults: MetaDefaults
+    limits: MetaLimits
+    index: MetaIndex
+    ranking: MetaRanking
