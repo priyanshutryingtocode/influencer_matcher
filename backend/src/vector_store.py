@@ -60,7 +60,6 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE IF NOT EXISTS {table} (
     id INTEGER PRIMARY KEY,
     handle TEXT NOT NULL,
-    niche TEXT NOT NULL,
     platform TEXT NOT NULL,
     city TEXT NOT NULL,
     followers INTEGER NOT NULL,
@@ -69,7 +68,6 @@ CREATE TABLE IF NOT EXISTS {table} (
     bio TEXT NOT NULL,
     embedding VECTOR({config.EMBED_DIMENSIONS}) NOT NULL,
     name TEXT,
-    secondary_niches TEXT[],
     country TEXT,
     language TEXT,
     average_views INTEGER,
@@ -77,19 +75,17 @@ CREATE TABLE IF NOT EXISTS {table} (
     average_comments INTEGER,
     verified BOOLEAN,
     posts_per_week INTEGER,
-    account_age_years INTEGER,
-    content_style TEXT,
-    audience_age TEXT,
-    audience_gender TEXT,
-    audience_country TEXT,
-    brand_collaborations TEXT[]
+    account_age_years INTEGER
 );
 
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embed_model TEXT;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_hash TEXT;
 ALTER TABLE {table} DROP COLUMN IF EXISTS rate;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS name TEXT;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS secondary_niches TEXT[];
+-- The single-label taxonomy is gone; topic tags are the only topical signal.
+-- DROP (not SET NULL) because nothing reads these columns any more.
+ALTER TABLE {table} DROP COLUMN IF EXISTS niche;
+ALTER TABLE {table} DROP COLUMN IF EXISTS secondary_niches;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS country TEXT;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS language TEXT;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS average_views INTEGER;
@@ -98,11 +94,12 @@ ALTER TABLE {table} ADD COLUMN IF NOT EXISTS average_comments INTEGER;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS verified BOOLEAN;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS posts_per_week INTEGER;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS account_age_years INTEGER;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_style TEXT;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS audience_age TEXT;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS audience_gender TEXT;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS audience_country TEXT;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS brand_collaborations TEXT[];
+-- Inferred characteristics live in creator_signals (migration 007), not here.
+ALTER TABLE {table} DROP COLUMN IF EXISTS content_style;
+ALTER TABLE {table} DROP COLUMN IF EXISTS audience_age;
+ALTER TABLE {table} DROP COLUMN IF EXISTS audience_gender;
+ALTER TABLE {table} DROP COLUMN IF EXISTS audience_country;
+ALTER TABLE {table} DROP COLUMN IF EXISTS brand_collaborations;
 
 CREATE INDEX IF NOT EXISTS {table}_embedding_idx
     ON {table} USING hnsw (embedding vector_cosine_ops);
@@ -150,20 +147,62 @@ def init_schema(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
     _schema_ready_tables.add(table)
 
 
-def drop_table(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
-    _validate_identifier(table)
-    conn.execute(f"DROP TABLE IF EXISTS {table}")
-    _schema_ready_tables.discard(table)  # force schema re-init if reused
-
-
-def clear_table(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
-    _validate_identifier(table)
-    conn.execute(f"TRUNCATE {table}")
-
-
 def count_influencers(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> int:
     _validate_identifier(table)
     return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+
+class IndexModelMismatch(RuntimeError):
+    """The stored creator index was built by a different embedding model.
+
+    Raised instead of letting a search fail deep inside pgvector with an opaque
+    "expected N dimensions, not M" error, so the API can report the actionable
+    cause: the index needs a reindex.
+    """
+
+
+def _embedding_dimension(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> int | None:
+    row = conn.execute(
+        """
+        SELECT format_type(att.atttypid, att.atttypmod)
+        FROM pg_attribute AS att
+        WHERE att.attrelid = to_regclass(%s)
+          AND att.attname = 'embedding'
+          AND NOT att.attisdropped
+        """,
+        (table,),
+    ).fetchone()
+    if not row or not row[0]:
+        return None
+    digits = "".join(char for char in str(row[0]) if char.isdigit())
+    return int(digits) if digits else None
+
+
+def assert_index_matches_config(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
+    """Fail fast when the index cannot answer queries for the configured model.
+
+    A vector column of the wrong width, or rows labelled with another embedder,
+    means every search would either error or silently compare incompatible
+    vector spaces.
+    """
+    width = _embedding_dimension(conn, table)
+    if width is not None and width != config.EMBED_DIMENSIONS:
+        raise IndexModelMismatch(
+            f"creator index is vector({width}) but EMBED_DIMENSIONS="
+            f"{config.EMBED_DIMENSIONS}; reindex with `python main.py --reindex` "
+            f"after changing the embedding model."
+        )
+    _validate_identifier(table)
+    rows = conn.execute(
+        f"SELECT DISTINCT embed_model FROM {table} WHERE embed_model IS NOT NULL LIMIT 5"
+    ).fetchall()
+    stale = {row[0] for row in rows} - {config.EMBED_MODEL}
+    if stale:
+        raise IndexModelMismatch(
+            f"creator index was built with {sorted(stale)} but the service is "
+            f"configured for {config.EMBED_MODEL!r}; reindex with "
+            f"`python main.py --reindex`."
+        )
 
 
 def _refresh_stats(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None:
@@ -187,43 +226,67 @@ def upsert_influencers(
     _validate_identifier(table)
     rows = [
         (
-            inf.id, inf.handle, inf.niche, inf.platform, inf.city,
+            inf.id, inf.handle, inf.platform, inf.city,
             inf.followers, inf.engagement, inf.tags, inf.bio,
-            inf.embedding, config.LOCAL_EMBED_MODEL, _content_hash(inf.corpus_text()),
-            inf.name, inf.secondary_niches, inf.country, inf.language,
+            inf.embedding, config.EMBED_MODEL, _content_hash(inf.corpus_text()),
+            inf.name, inf.country, inf.language,
             inf.average_views, inf.average_likes, inf.average_comments,
             inf.verified, inf.posts_per_week, inf.account_age_years,
-            inf.content_style, inf.audience_age, inf.audience_gender,
-            inf.audience_country, inf.brand_collaborations,
         )
         for inf in influencers
+    ]
+    signal_rows = [
+        (
+            s.creator_id, s.content_style, s.audience_age, s.audience_gender,
+            s.audience_country, s.brand_collaborations, s.reach_ratio,
+            s.sponsored_ratio, s.growth_trend, s.audience_top_countries,
+        )
+        for s in (inf.signals() for inf in influencers)
     ]
     with conn.cursor() as cur:
         cur.executemany(
             f"""
             INSERT INTO {table}
-                (id, handle, niche, platform, city, followers, engagement, tags, bio,
-                 embedding, embed_model, content_hash, name, secondary_niches, country, language,
+                (id, handle, platform, city, followers, engagement, tags, bio,
+                 embedding, embed_model, content_hash, name, country, language,
                  average_views, average_likes, average_comments, verified, posts_per_week,
-                 account_age_years, content_style, audience_age, audience_gender, audience_country,
-                 brand_collaborations)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 account_age_years)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
-                handle = EXCLUDED.handle, niche = EXCLUDED.niche, platform = EXCLUDED.platform,
+                handle = EXCLUDED.handle, platform = EXCLUDED.platform,
                 city = EXCLUDED.city, followers = EXCLUDED.followers, engagement = EXCLUDED.engagement,
                 tags = EXCLUDED.tags, bio = EXCLUDED.bio,
                 embedding = EXCLUDED.embedding, embed_model = EXCLUDED.embed_model,
                 content_hash = EXCLUDED.content_hash, name = EXCLUDED.name,
-                secondary_niches = EXCLUDED.secondary_niches, country = EXCLUDED.country,
+                country = EXCLUDED.country,
                 language = EXCLUDED.language, average_views = EXCLUDED.average_views,
                 average_likes = EXCLUDED.average_likes, average_comments = EXCLUDED.average_comments,
                 verified = EXCLUDED.verified, posts_per_week = EXCLUDED.posts_per_week,
-                account_age_years = EXCLUDED.account_age_years, content_style = EXCLUDED.content_style,
-                audience_age = EXCLUDED.audience_age, audience_gender = EXCLUDED.audience_gender,
-                audience_country = EXCLUDED.audience_country,
-                brand_collaborations = EXCLUDED.brand_collaborations
+                account_age_years = EXCLUDED.account_age_years
             """,
             rows,
+        )
+        # Written after the creators so the foreign key always resolves, even
+        # on a re-upsert where a signals row already exists.
+        cur.executemany(
+            """
+            INSERT INTO creator_signals
+                (creator_id, content_style, audience_age, audience_gender,
+                 audience_country, brand_collaborations, reach_ratio,
+                 sponsored_ratio, growth_trend, audience_top_countries)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (creator_id) DO UPDATE SET
+                content_style = EXCLUDED.content_style,
+                audience_age = EXCLUDED.audience_age,
+                audience_gender = EXCLUDED.audience_gender,
+                audience_country = EXCLUDED.audience_country,
+                brand_collaborations = EXCLUDED.brand_collaborations,
+                reach_ratio = EXCLUDED.reach_ratio,
+                sponsored_ratio = EXCLUDED.sponsored_ratio,
+                growth_trend = EXCLUDED.growth_trend,
+                audience_top_countries = EXCLUDED.audience_top_countries
+            """,
+            signal_rows,
         )
 
 
@@ -241,7 +304,9 @@ def replace_influencers(
     """
     _validate_identifier(table)
     with conn.transaction():
-        conn.execute(f"TRUNCATE {table}")
+        # CASCADE so the signals rows go with their creators; without it the
+        # foreign key would block the truncate.
+        conn.execute(f"TRUNCATE {table} CASCADE")
         upsert_influencers(conn, influencers, table=table)
     _refresh_stats(conn, table)
 
@@ -252,7 +317,6 @@ def search(
     platform: str,
     top_k: int,
     table: str = DEFAULT_TABLE,
-    niche: str | None = None,
 ) -> list[Influencer]:
     _validate_identifier(table)
 
@@ -268,45 +332,48 @@ def search(
     except Exception:
         pass
 
-    # Niche boost: when provided, subtract a fixed distance bonus for
-    # matching niche rows.
-    niche_boost_sql = ""
-    if niche:
-        niche_boost_sql = " - (CASE WHEN niche = %s THEN 0.05 ELSE 0 END)"
-
+    # One LEFT JOIN, not a second query: retrieval returns top_k rows and a
+    # per-row signal fetch would be top_k round trips. The join is on the
+    # primary key, so it does not change the row set, and every signal is
+    # COALESCEd so a creator with no signal row still reads back cleanly
+    # rather than raising on a NULL.
     sql = f"""
-        SELECT id, handle, niche, platform, city, followers, engagement, tags, bio,
-               1 - (embedding <=> %s) AS similarity,
-               COALESCE(name, ''), COALESCE(secondary_niches, ARRAY[]::TEXT[]),
-               COALESCE(country, ''), COALESCE(language, ''), COALESCE(average_views, 0),
-               COALESCE(average_likes, 0), COALESCE(average_comments, 0), COALESCE(verified, FALSE),
-               COALESCE(posts_per_week, 0), COALESCE(account_age_years, 0),
-               COALESCE(content_style, ''), COALESCE(audience_age, ''),
-               COALESCE(audience_gender, ''), COALESCE(audience_country, ''),
-               COALESCE(brand_collaborations, ARRAY[]::TEXT[])
-        FROM {table}
+        SELECT i.id, i.handle, i.platform, i.city, i.followers, i.engagement, i.tags, i.bio,
+               1 - (i.embedding <=> %s) AS similarity,
+               COALESCE(i.name, ''),
+               COALESCE(i.country, ''), COALESCE(i.language, ''), COALESCE(i.average_views, 0),
+               COALESCE(i.average_likes, 0), COALESCE(i.average_comments, 0), COALESCE(i.verified, FALSE),
+               COALESCE(i.posts_per_week, 0), COALESCE(i.account_age_years, 0),
+               COALESCE(s.content_style, ''), COALESCE(s.audience_age, ''),
+               COALESCE(s.audience_gender, ''), COALESCE(s.audience_country, ''),
+               COALESCE(s.brand_collaborations, ARRAY[]::TEXT[]),
+               COALESCE(s.reach_ratio, 0), COALESCE(s.sponsored_ratio, 0),
+               COALESCE(s.growth_trend, ''),
+               COALESCE(s.audience_top_countries, ARRAY[]::TEXT[])
+        FROM {table} AS i
+        LEFT JOIN creator_signals AS s ON s.creator_id = i.id
     """
     params: list = [query_embedding]
     if platform != "Any":
-        sql += " WHERE platform = %s"
+        sql += " WHERE i.platform = %s"
         params.append(platform)
-    sql += f" ORDER BY (embedding <=> %s){niche_boost_sql} LIMIT %s"
+    sql += " ORDER BY (i.embedding <=> %s) LIMIT %s"
     params.append(query_embedding)
-    if niche:
-        params.append(niche)
     params.append(top_k)
 
     rows = conn.execute(sql, params).fetchall()
     return [
         Influencer(
-            id=r[0], handle=r[1], niche=r[2], platform=r[3], city=r[4],
-            followers=r[5], engagement=float(r[6]), tags=list(r[7]), bio=r[8],
-            similarity=float(r[9]),
-            name=r[10], secondary_niches=list(r[11]), country=r[12], language=r[13],
-            average_views=r[14], average_likes=r[15], average_comments=r[16],
-            verified=r[17], posts_per_week=r[18], account_age_years=r[19],
-            content_style=r[20], audience_age=r[21], audience_gender=r[22],
-            audience_country=r[23], brand_collaborations=list(r[24]),
+            id=r[0], handle=r[1], platform=r[2], city=r[3],
+            followers=r[4], engagement=float(r[5]), tags=list(r[6]), bio=r[7],
+            similarity=float(r[8]),
+            name=r[9], country=r[10], language=r[11],
+            average_views=r[12], average_likes=r[13], average_comments=r[14],
+            verified=r[15], posts_per_week=r[16], account_age_years=r[17],
+            content_style=r[18], audience_age=r[19], audience_gender=r[20],
+            audience_country=r[21], brand_collaborations=list(r[22]),
+            reach_ratio=float(r[23]), sponsored_ratio=float(r[24]),
+            growth_trend=r[25], audience_top_countries=list(r[26]),
         )
         for r in rows
     ]

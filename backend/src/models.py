@@ -4,14 +4,42 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-_NICHES = None
+
+@dataclass
+class CreatorSignals:
+    """Inferred, third-party characteristics, kept out of the searchable row.
+
+    `influencers` holds what a creator's own profile states: handle, reach,
+    topics, bio. Everything here is an estimate made *about* that profile by an
+    analytics provider, so it belongs in its own table with its own lifecycle.
+    The split matters for two reasons: a signal can be refreshed without
+    re-embedding a profile, and a reason can say "inferred audience 25-34"
+    rather than implying the creator declared it.
+
+    Fields are set in the same order the ranking prompt may cite them, and
+    `Influencer.corpus_text` still reads them, so moving them between tables
+    did not change the embedded text.
+    """
+
+    creator_id: int
+    content_style: str = ""
+    audience_age: str = ""
+    audience_gender: str = ""
+    audience_country: str = ""
+    brand_collaborations: list[str] = field(default_factory=list)
+    # views / followers. The honest measure of whether reach is real: a
+    # follower count can be large while actual reach stays small.
+    reach_ratio: float = 0.0
+    # Share of posts that are paid, 0..1.
+    sponsored_ratio: float = 0.0
+    growth_trend: str = ""
+    audience_top_countries: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Influencer:
     id: int
     handle: str
-    niche: str
     platform: str
     city: str
     followers: int
@@ -21,7 +49,6 @@ class Influencer:
     embedding: np.ndarray = None
     similarity: float | None = None
     name: str = ""
-    secondary_niches: list[str] = field(default_factory=list)
     country: str = ""
     language: str = ""
     average_views: int = 0
@@ -30,45 +57,89 @@ class Influencer:
     verified: bool = False
     posts_per_week: int = 0
     account_age_years: int = 0
+    # Populated from the creator_signals row on read; see CreatorSignals.
     content_style: str = ""
     audience_age: str = ""
     audience_gender: str = ""
     audience_country: str = ""
     brand_collaborations: list[str] = field(default_factory=list)
+    reach_ratio: float = 0.0
+    sponsored_ratio: float = 0.0
+    growth_trend: str = ""
+    audience_top_countries: list[str] = field(default_factory=list)
+
+    def signals(self) -> CreatorSignals:
+        """The signal row for this creator, as stored."""
+        return CreatorSignals(
+            creator_id=self.id,
+            content_style=self.content_style,
+            audience_age=self.audience_age,
+            audience_gender=self.audience_gender,
+            audience_country=self.audience_country,
+            brand_collaborations=list(self.brand_collaborations),
+            reach_ratio=self.reach_ratio,
+            sponsored_ratio=self.sponsored_ratio,
+            growth_trend=self.growth_trend,
+            audience_top_countries=list(self.audience_top_countries),
+        )
+
+    def apply_signals(self, signals: CreatorSignals) -> None:
+        """Copy a signal row onto this creator, as read from the join."""
+        self.content_style = signals.content_style
+        self.audience_age = signals.audience_age
+        self.audience_gender = signals.audience_gender
+        self.audience_country = signals.audience_country
+        self.brand_collaborations = list(signals.brand_collaborations)
+        self.reach_ratio = signals.reach_ratio
+        self.sponsored_ratio = signals.sponsored_ratio
+        self.growth_trend = signals.growth_trend
+        self.audience_top_countries = list(signals.audience_top_countries)
 
     def corpus_text(self) -> str:
-        return (
-            f"Creator {self.handle} on {self.platform}, based in {self.city}. "
-            f"Niche: {self.niche}. Topics: {', '.join(self.tags)}. {self.bio}"
-        )
+        """The text this creator is embedded as, and the text a reason may cite.
+
+        This is the single source of truth for what a profile "says". It
+        deliberately includes every field the ranking model is allowed to cite
+        as evidence, so retrieval can match on it and a grounded reason can
+        quote it. Changing this invalidates every cached vector.
+
+        The signal fields are read through the same accessors whether they live
+        on this row or in creator_signals, which is what let those columns move
+        to their own table without invalidating a single cached vector.
+        """
+        facts = [
+            f"Creator {self.handle} on {self.platform}, based in {self.city}, {self.country}.",
+            f"Topics: {', '.join(self.tags)}.",
+        ]
+        if self.content_style:
+            facts.append(f"Content style: {self.content_style}.")
+        audience = ", ".join(p for p in (self.audience_age, self.audience_gender, self.audience_country) if p)
+        if audience:
+            facts.append(f"Audience: {audience}.")
+        if self.brand_collaborations:
+            facts.append(f"Past brand partners: {', '.join(self.brand_collaborations)}.")
+        if self.bio:
+            facts.append(self.bio)
+        return " ".join(facts)
 
 
 @dataclass
 class Brief:
-    niche: str
-    platform: str  
+    goal: str
+    platform: str
     audience: str = ""
     vibe: str = ""
 
     def query_text(self) -> str:
-        """Text representation used as the retrieval query (the RAG 'query').
-        Niche is included here (not enforced as a hard filter) since it's a
-        semantic signal, not a strict eligibility criterion the way platform
-        is. The niche and its topic keywords are weighted heavily so the
-        query vector and a profile's niche-tagged vector land close together,
-        which is what drives retrieval precision."""
-        keywords = ""
-        if self.niche:
-            global _NICHES
-            if _NICHES is None:
-                from .data_generator import NICHES
-                _NICHES = NICHES
-            topics = _NICHES.get(self.niche)
-            if topics:
-                keywords = f" Topics include: {', '.join(topics)}."
-        return (
-            f"Niche: {self.niche}.{keywords} "
-            f"Looking for a {self.niche} creator with a target audience "
-            f"of {self.audience or 'general audiences'} and a "
-            f"{self.vibe or 'versatile'} vibe / tone."
-        )
+        """Text embedded as the retrieval query (the RAG 'query').
+
+        This is the brand's own words, not a templated scaffold. Platform is
+        omitted because it is already a hard metadata filter, so repeating it
+        here would only dilute the topical signal.
+        """
+        parts = [self.goal.strip()]
+        if self.audience.strip():
+            parts.append(f"Target audience: {self.audience.strip()}.")
+        if self.vibe.strip():
+            parts.append(f"Tone: {self.vibe.strip()}.")
+        return " ".join(parts)
