@@ -25,8 +25,10 @@
   --radius-pill: 999px;
 
   /* Type scale. Every font-size in this file resolves to one of these steps so
-     adjacent text never renders at subtly different sizes. */
-  --text-2xs: .64rem;
+     adjacent text never renders at subtly different sizes.
+     --text-2xs was .64rem (10.24px) and carried ten label roles. Every pairing
+     it was used in passed contrast easily, so size was the limit, not colour. */
+  --text-2xs: .71rem;
   --text-xs: .74rem;
   --text-sm: .84rem;
   --text-base: .94rem;
@@ -38,7 +40,11 @@
   --signal-soft: rgb(200 243 107 / 4%);
   --signal-line: rgb(200 243 107 / 34%);
   --signal-glow: rgb(200 243 107 / 10%);
-  --signal-focus: rgb(200 243 107 / 35%);
+  /* Focus ring. At 35% this measured 2.73:1 against --surface, under the 3:1
+     that WCAG 1.4.11 asks of a focus indicator. The focus border was carrying it
+     at 15:1, but the ring should stand on its own -- 70% is 7.4-8.1:1 and still
+     reads as a glow rather than a second border. */
+  --signal-focus: rgb(200 243 107 / 70%);
   --signal-hover: #d9ff8e;
   --danger-soft: rgb(239 129 117 / 40%);
   --topbar-veil: rgb(12 14 16 / 88%);
@@ -57,6 +63,9 @@ button { color: inherit; }
 
 .skip-link { position: fixed; left: 1rem; top: -4rem; z-index: 20; padding: .6rem .8rem; background: var(--signal); color: var(--canvas); font-weight: 700; }
 .skip-link:focus { top: 1rem; }
+/* Available to assistive tech, out of the visual layout. Used for the loading
+   announcement that replaces a visible-but-empty results area. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .app-shell { min-height: 100vh; }
 .topbar { position: sticky; top: 0; z-index: 30; min-height: 76px; padding: 0 var(--page-gutter); border-bottom: 1px solid var(--rule); background: var(--topbar-veil); backdrop-filter: blur(14px); }
 .topbar-inner { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 1.5rem; width: min(var(--content-width), calc(100% - var(--page-gutter) - var(--page-gutter))); min-height: 76px; margin: 0 auto; }
@@ -133,6 +142,9 @@ input, select, textarea { width: 100%; border: 1px solid var(--rule); border-rad
 textarea { min-height: 80px; resize: vertical; }
 select { cursor: pointer; }
 input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { border-color: var(--signal); outline: 2px solid var(--signal-focus); outline-offset: 2px; }
+/* <main> takes programmatic focus on every route change. It has no border, so
+   the generic rule above would draw a ring around the entire page. */
+.main-content:focus, .main-content:focus-visible { outline: none; }
 .rail-divider { height: 1px; background: var(--rule); }
 .retrieval-controls { display: grid; gap: 1rem; }
 .control-heading { color: var(--muted-strong); font-size: var(--text-xs); font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
@@ -237,6 +249,15 @@ input[type="range"] { padding: 0; border: 0; background: transparent; accent-col
 .summary-item-primary dd strong { color: var(--signal); }
 .summary-strip-compact .summary-item { padding: .6rem .65rem; }
 
+/* The similarity caveat, as a disclosure. It was a title= on a <dt>, which no
+   keyboard or touch user could reach at all. */
+.summary-explain-toggle { display: inline-flex; align-items: center; gap: .3rem; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.summary-explain-toggle:hover { color: var(--text); }
+.summary-explain-icon { display: inline-grid; place-items: center; width: 13px; height: 13px; border: 1px solid var(--rule-strong); border-radius: var(--radius-pill); color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: 0; }
+.summary-explain-toggle:hover .summary-explain-icon { border-color: var(--signal-dim); color: var(--signal-dim); }
+.summary-explain-body { display: block; flex-basis: 100%; max-width: 30ch; margin-top: .5rem; color: var(--muted); font-size: var(--text-xs); font-weight: 400; line-height: 1.45; letter-spacing: 0; text-transform: none; }
+.summary-item dd { flex-wrap: wrap; }
+
 .result-list { container: result-list / inline-size; border-top: 1px solid var(--rule); }
 .result-row { position: relative; display: grid; grid-template-columns: 40px minmax(180px, 1.3fr) 120px minmax(150px, .8fr) minmax(210px, 1fr); column-gap: 1rem; row-gap: .75rem; align-items: start; padding: 1rem 0; border-bottom: 1px solid var(--rule); }
 .result-row:hover { background: var(--surface-soft); }
@@ -261,6 +282,10 @@ input[type="range"] { padding: 0; border: 0; background: transparent; accent-col
 .fit-mark-weak + .fit-label { color: var(--danger); }
 .fit-mark-unknown + .fit-label { color: var(--muted-strong); }
 .source-label { color: var(--warning); font-size: var(--text-2xs); line-height: 1.2; }
+/* Why a row fell back. The source label says that ranking was skipped; this
+   says what to do about it, which is the difference between a metered daily
+   cap (retry tomorrow) and a truncated response (nothing is wrong). */
+.source-detail { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; }
 .result-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
 .result-metric { display: grid; gap: .2rem; min-width: 0; }
 .result-metric span { color: var(--muted); font-size: var(--text-2xs); }
@@ -410,9 +435,18 @@ details ul { margin: .45rem 0; padding-left: 1rem; }
   .summary-item:nth-child(n + 3) { border-top: 1px solid var(--rule); }
   .summary-item:nth-child(even) { border-left: 1px solid var(--rule); }
   .summary-item:nth-child(odd) { border-left: 0; }
+  .summary-explain-body { max-width: none; }
   .result-row { padding: .85rem 0; }
   .result-metrics { gap: .35rem; }
   .overlap-items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Two 140px columns needed 288px, which is the entire 320px viewport once
+     the gutter is subtracted -- so any zoom overflowed horizontally. */
+  .overlap-item { min-width: 0; }
+  /* The 4-column pipeline had no breakpoint at any width, so at 320px each
+     step was ~66px and the labels wrapped mid-word. */
+  .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 330px of dead vertical space for a two-line empty state on a phone. */
+  .empty-state { min-height: 200px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

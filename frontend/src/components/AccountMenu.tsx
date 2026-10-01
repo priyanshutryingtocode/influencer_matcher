@@ -17,6 +17,8 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const signOutRef = useRef<HTMLButtonElement>(null);
   const identity = getAccountIdentity(user);
 
   useEffect(() => {
@@ -27,6 +29,8 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
     }
 
     function closeOnEscape(event: KeyboardEvent) {
+      // Listening on document, not on the popover: Escape has to close this
+      // wherever focus happens to be, including on the trigger.
       if (event.key === "Escape") setOpen(false);
     }
 
@@ -36,6 +40,18 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      // Opening a popover without moving focus into it leaves a keyboard user
+      // tabbing blind through the page behind it.
+      signOutRef.current?.focus();
+      return;
+    }
+    // Closing returns focus to the trigger, so the user is not dropped at the
+    // top of the document.
+    triggerRef.current?.focus();
   }, [open]);
 
   async function handleSignOut() {
@@ -52,10 +68,11 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
   return (
     <div className="account-menu-root" ref={rootRef}>
       <button
+        ref={triggerRef}
         className={open ? "account-trigger open" : "account-trigger"}
         type="button"
-        aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? "account-popover" : undefined}
         aria-label={open ? "Close account menu" : "Open account menu"}
         onClick={() => setOpen((current) => !current)}
       >
@@ -63,7 +80,11 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
         <span className="account-trigger-name">{identity.displayName}</span>
       </button>
       {open && (
-        <div className="account-menu" role="menu" aria-label="Account">
+        /* A disclosure, not a menu. role="menu" was claiming a widget pattern
+           its contents did not follow -- an identity header, a rule, and a live
+           error region are not menu items -- and with one action it bought
+           nothing over aria-expanded. */
+        <div className="account-menu" id="account-popover" aria-label="Account">
           <div className="account-menu-header">
             <span className="account-avatar account-avatar-large" aria-hidden="true">{identity.initials}</span>
             <div className="account-menu-identity">
@@ -71,8 +92,8 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
               <span>{identity.email}</span>
             </div>
           </div>
-          <div className="account-menu-rule" />
-          <button className="account-menu-action" type="button" role="menuitem" disabled={signingOut} onClick={() => void handleSignOut()}>
+          <div className="account-menu-rule" aria-hidden="true" />
+          <button ref={signOutRef} className="account-menu-action" type="button" disabled={signingOut} onClick={() => void handleSignOut()}>
             {signingOut ? "Signing out..." : "Sign out"}
           </button>
           {error && <p className="account-menu-error" role="alert">{error}</p>}

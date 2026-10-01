@@ -6,10 +6,12 @@ interface RunContextProps {
   createdAt: string;
   /** Distinct label per page, e.g. "Shortlist" or "Run detail". */
   label: string;
+  /** A double-click used to fire two downloads before the first resolved. */
+  exporting?: boolean;
   onExport: () => void;
 }
 
-export function RunContext({ brief, createdAt, label, onExport }: RunContextProps) {
+export function RunContext({ brief, createdAt, label, exporting = false, onExport }: RunContextProps) {
   return (
     <div className="run-context">
       <div>
@@ -21,7 +23,9 @@ export function RunContext({ brief, createdAt, label, onExport }: RunContextProp
           {brief.vibe && <><span>/</span> {brief.vibe}</>}
         </p>
       </div>
-      <button className="btn btn-secondary" type="button" onClick={onExport}>Export CSV</button>
+      <button className="btn btn-secondary" type="button" onClick={onExport} disabled={exporting} aria-busy={exporting}>
+        {exporting ? "Exporting..." : "Export CSV"}
+      </button>
     </div>
   );
 }

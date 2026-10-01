@@ -16,6 +16,12 @@ function makeUser(displayName?: string, email = "user@example.com"): User {
   };
 }
 
+function openMenu(displayName?: string, signOut = vi.fn()) {
+  render(<AccountMenu user={makeUser(displayName)} signOut={signOut} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
+  return { signOut, trigger: screen.getByRole("button", { name: "Close account menu" }) };
+}
+
 describe("AccountMenu", () => {
   afterEach(() => {
     cleanup();
@@ -27,45 +33,61 @@ describe("AccountMenu", () => {
     expect(getInitials("", "alex@example.com")).toBe("AL");
   });
 
-  it("opens an account menu with identity details", () => {
-    render(<AccountMenu user={makeUser("Alex Morgan")} signOut={vi.fn()} />);
+  it("opens a disclosure with identity details", () => {
+    const { trigger } = openMenu("Alex Morgan");
+    const popover = screen.getByLabelText("Account");
 
-    fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
-    const menu = screen.getByRole("menu", { name: "Account" });
-    expect(within(menu).getByText("Alex Morgan")).toBeTruthy();
-    expect(within(menu).getByText("user@example.com")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Close account menu" }).getAttribute("aria-expanded")).toBe("true");
+    expect(within(popover).getByText("Alex Morgan")).toBeTruthy();
+    expect(within(popover).getByText("user@example.com")).toBeTruthy();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(trigger.getAttribute("aria-controls")).toBe(popover.id);
   });
 
-  it("signs out from the menu instead of the trigger", () => {
-    const signOut = vi.fn().mockResolvedValue(undefined);
-    render(<AccountMenu user={makeUser("Alex Morgan")} signOut={signOut} />);
+  /* role="menu" claimed a widget pattern the contents did not follow -- an
+   * identity header, a decorative rule and a live error region are not menu
+   * items. These assert the pattern that replaced it, so the invalid roles
+   * cannot come back unnoticed. */
+  it("does not claim the menu widget pattern", () => {
+    openMenu("Alex Morgan");
 
-    fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+  });
+
+  it("moves focus into the popover on open and back to the trigger on close", () => {
+    const { trigger } = openMenu();
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sign out" }));
+
+    fireEvent.click(trigger);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open account menu" }));
+  });
+
+  it("signs out from the popover instead of the trigger", () => {
+    const signOut = vi.fn().mockResolvedValue(undefined);
+    openMenu("Alex Morgan", signOut);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
     expect(signOut).toHaveBeenCalledOnce();
   });
 
   it("closes on Escape and outside pointer events", () => {
     render(<AccountMenu user={makeUser()} signOut={vi.fn()} />);
-    const trigger = screen.getByRole("button", { name: "Open account menu" });
 
-    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByLabelText("Account")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByLabelText("Account")).toBeNull();
   });
 
   it("shows a readable message when sign-out fails", async () => {
-    const signOut = vi.fn().mockRejectedValue(new Error("network"));
-    render(<AccountMenu user={makeUser()} signOut={signOut} />);
+    openMenu(undefined, vi.fn().mockRejectedValue(new Error("network")));
 
-    fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain("Could not sign out");
   });

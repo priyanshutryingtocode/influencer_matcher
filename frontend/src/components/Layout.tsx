@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { AccountMenu } from "./AccountMenu";
@@ -12,6 +13,23 @@ const navItems = [
 
 export function Layout() {
   const { user, signOut, isConfigured } = useAuth();
+  const location = useLocation();
+  const mainRef = useRef<HTMLElement>(null);
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    /* Nothing announced a page change, so a keyboard or screen-reader user
+     * moved through three routes with no signal that anything had happened.
+     * Focusing <main> (rather than the h1) also puts the next Tab back at the
+     * top of the new page's controls. Skipped on first render so arriving at
+     * the app does not yank focus away from whatever the user was doing. */
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    mainRef.current?.focus();
+  }, [location.pathname]);
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
@@ -34,7 +52,10 @@ export function Layout() {
           </div>
         </div>
       </header>
-      <main id="main-content" className="page-content">
+      {/* tabindex="-1" so the skip link can actually move focus here, not just
+       * scroll to it -- several browsers ignore focus() on a non-focusable
+       * element, which left the target of the skip link unreliable. */}
+      <main id="main-content" className="page-content" tabIndex={-1} ref={mainRef}>
         <Outlet />
       </main>
     </div>

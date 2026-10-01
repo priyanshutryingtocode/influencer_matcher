@@ -6,7 +6,7 @@ import type { BackendState } from "../backend/BackendProvider";
 import { ProtectedRoute } from "./ProtectedRoute";
 
 const authMocks = vi.hoisted(() => ({ session: null as unknown }));
-const backendMocks = vi.hoisted(() => ({ status: "idle" as BackendState }));
+const backendMocks = vi.hoisted(() => ({ status: "idle" as BackendState, entered: false }));
 
 vi.mock("./AuthProvider", () => ({
   useAuth: () => ({ session: authMocks.session, loading: false, isConfigured: true }),
@@ -17,6 +17,7 @@ vi.mock("../backend/BackendProvider", () => ({
     status: backendMocks.status,
     error: null,
     checkedAt: null,
+    entered: backendMocks.entered,
     wake: vi.fn(),
     recheck: vi.fn(),
   }),
@@ -39,6 +40,7 @@ describe("ProtectedRoute", () => {
   beforeEach(() => {
     authMocks.session = { access_token: "token" };
     backendMocks.status = "idle";
+    backendMocks.entered = false;
   });
 
   afterEach(() => {
@@ -61,6 +63,31 @@ describe("ProtectedRoute", () => {
 
   it("renders the workspace once the backend is online", () => {
     backendMocks.status = "online";
+    renderGuard();
+
+    expect(screen.getByText("Search page")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Backend resting" })).toBeNull();
+  });
+
+  /* The regression this guards.
+   *
+   * The guard read `status !== "online"`, so anything that moved the state away
+   * from "online" replaced the entire routed app with the gate -- discarding a
+   * half-typed brief, an in-flight poll, and the selected history run. A
+   * sleeping host is exactly that situation, and it must not cost the user
+   * their page; the request timeout names the cause and the pill can wake it. */
+  it("keeps the workspace mounted after first entry, even if the host sleeps", () => {
+    backendMocks.entered = true;
+    backendMocks.status = "idle";
+    renderGuard();
+
+    expect(screen.getByText("Search page")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Backend resting" })).toBeNull();
+  });
+
+  it("keeps the workspace mounted when a recheck reports the backend is down", () => {
+    backendMocks.entered = true;
+    backendMocks.status = "error";
     renderGuard();
 
     expect(screen.getByText("Search page")).toBeTruthy();

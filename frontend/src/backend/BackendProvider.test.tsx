@@ -9,12 +9,14 @@ const apiMocks = vi.hoisted(() => ({ probeBackend: vi.fn() }));
 vi.mock("../api/client", () => ({ api: { probeBackend: apiMocks.probeBackend } }));
 
 function Harness() {
-  const { status, error, wake } = useBackend();
+  const { status, error, entered, wake, recheck } = useBackend();
   return (
     <div>
       <span data-testid="status">{status}</span>
       <span data-testid="error">{error ?? ""}</span>
+      <span data-testid="entered">{String(entered)}</span>
       <button type="button" onClick={() => void wake()}>Wake backend</button>
+      <button type="button" onClick={() => recheck()}>Recheck backend</button>
     </div>
   );
 }
@@ -69,6 +71,54 @@ describe("BackendProvider", () => {
       expect(screen.getByTestId("status").textContent).toBe("error");
     });
     expect(screen.getByTestId("error").textContent).toBe("The backend could not be reached.");
+  });
+
+  /* The regression these two guard.
+   *
+   * `recheck` used to set the state back to "idle", and ProtectedRoute replaced
+   * the whole routed app with the "backend resting" panel whenever the state
+   * was not "online". So clicking Recheck in the top bar -- and a 15-minute
+   * timer that did the same thing on its own -- unmounted the page, discarding
+   * a half-typed brief, an in-flight poll, and the selected history run. */
+  it("stays entered once online, so a later recheck never re-gates", async () => {
+    apiMocks.probeBackend.mockResolvedValue(undefined);
+    render(
+      <BackendProvider>
+        <Harness />
+      </BackendProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Wake backend" }));
+    await waitFor(() => expect(screen.getByTestId("entered").textContent).toBe("true"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Recheck backend" }));
+
+    await waitFor(() => expect(apiMocks.probeBackend).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("entered").textContent).toBe("true");
+  });
+
+  it("does not expire the online state on a timer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      apiMocks.probeBackend.mockResolvedValue(undefined);
+      render(
+        <BackendProvider>
+          <Harness />
+        </BackendProvider>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Wake backend" }));
+      await vi.waitFor(() => expect(screen.getByTestId("status").textContent).toBe("online"));
+
+      /* The old decay was 15 minutes, identical to useMatchJob's poll ceiling,
+       * so a slow run and the timer collided exactly. */
+      await vi.advanceTimersByTimeAsync(16 * 60 * 1000);
+
+      expect(screen.getByTestId("status").textContent).toBe("online");
+      expect(screen.getByTestId("entered").textContent).toBe("true");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

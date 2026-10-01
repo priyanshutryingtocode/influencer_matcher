@@ -160,4 +160,58 @@ describe("ResultCard", () => {
 
     expect(screen.getByText("—")).toBeTruthy();
   });
+
+  /* The reason reached this component and was dropped. The backend persists it
+   * precisely because a spent daily quota and a truncated response call for
+   * different advice from the reader. */
+  it("shows why a row fell back, without the machine-readable tag", () => {
+    render(
+      <ResultCard
+        creator={creator}
+        entry={{ ...entry, source: "fallback", fallback_reason: "daily_quota: The counter resets at midnight Pacific." }}
+        brief={brief}
+      />,
+    );
+
+    expect(screen.getByText("Retrieval fallback")).toBeTruthy();
+    expect(screen.getByText("The counter resets at midnight Pacific.")).toBeTruthy();
+    expect(screen.queryByText(/daily_quota/)).toBeNull();
+  });
+
+  it("leaves an untagged fallback reason intact", () => {
+    render(
+      <ResultCard
+        creator={creator}
+        entry={{ ...entry, source: "fallback", fallback_reason: "Response stopped early: finish_reason=MAX_TOKENS" }}
+        brief={brief}
+      />,
+    );
+
+    expect(screen.getByText("Response stopped early: finish_reason=MAX_TOKENS")).toBeTruthy();
+  });
+
+  it("omits the reason when a normally ranked row has none", () => {
+    const { container } = render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
+    expect(container.querySelector(".source-detail")).toBeNull();
+  });
+
+  /* Platform is a hard filter on a filtered run, so naming it on every row is
+   * noise. On an "Any" brief it is the only thing telling you which platform a
+   * creator is on. */
+  it("shows the platform on an Any brief and omits it when filtered", () => {
+    const { container, rerender } = render(
+      <ResultCard creator={creator} entry={entry} brief={{ ...brief, platform: "Any" }} />,
+    );
+    expect(container.textContent).toContain("TikTok · Austin · Educational");
+
+    rerender(<ResultCard creator={creator} entry={entry} brief={brief} />);
+    expect(container.textContent).not.toContain("TikTok · Austin");
+  });
+
+  it("names the similarity metric for assistive tech, not just a bare percent", () => {
+    render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
+    expect(screen.getByLabelText("Cosine similarity to your brief: 91.0%")).toBeTruthy();
+  });
 });
