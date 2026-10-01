@@ -312,15 +312,23 @@ def test_query_cache_ignores_records_from_another_model(tmp_path):
     assert embeddings.EmbeddingCache(path, model="text-embedding-004").get("k") is None
 
 
-def test_the_service_path_never_touches_disk(fake_api, monkeypatch):
+def test_the_service_path_never_touches_disk(fake_api, recorder, monkeypatch):
     """A live request must not read or write the cache: Render's filesystem is
     ephemeral and the cache holds every vector it has seen in memory."""
+    # This test shipped without calling fake_api(). The fixture only *returns* the
+    # installer, so it ran against the real Gemini endpoint and spent a day of the
+    # embedding quota on every full-suite run. It surfaced as a
+    # DailyQuotaExhausted failure, which is how it was found.
+    fake_api()
 
     def boom(*args, **kwargs):
         raise AssertionError("the default query path persisted to disk")
 
     monkeypatch.setattr(embeddings.EmbeddingCache, "put_many", boom)
     assert embeddings.get_cached_query_vector("a brief") is not None
+    # Asserted so a future refactor that skips the stub cannot leave this quietly
+    # reaching the network again: an empty recorder means nothing was embedded.
+    assert len(recorder) == 1
 
 
 def test_concurrent_writers_do_not_interleave_records(tmp_path):
