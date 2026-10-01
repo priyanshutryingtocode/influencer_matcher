@@ -16,11 +16,25 @@ vi.mock("../api/client", () => ({
   ApiError: class ApiError extends Error {},
 }));
 
-const vi_mock_useMatchJob = vi.hoisted(() => ({
-  useMatchJob: () => ({ job: null, error: null, isRunning: false, start: vi.fn() }),
+const matchJobState = vi.hoisted(() => ({
+  job: null as { status: string; stage: string; outcome: string | null; run_id: string | null } | null,
+  error: null as string | null,
+  isRunning: false,
+  start: vi.fn(),
 }));
 
-vi.mock("../hooks/useMatchJob", () => vi_mock_useMatchJob);
+function makeJob(stage: string, status = "running") {
+  return { status, stage, outcome: null, run_id: null };
+}
+
+vi.mock("../hooks/useMatchJob", () => ({
+  useMatchJob: () => ({
+    job: matchJobState.job,
+    error: matchJobState.error,
+    isRunning: matchJobState.isRunning,
+    start: matchJobState.start,
+  }),
+}));
 
 function makeMeta(overrides: Partial<Meta> = {}): Meta {
   return {
@@ -49,6 +63,10 @@ describe("SearchPage", () => {
   beforeEach(() => {
     apiMocks.getMeta.mockReset();
     apiMocks.getRun.mockReset();
+    matchJobState.job = null;
+    matchJobState.error = null;
+    matchJobState.isRunning = false;
+    matchJobState.start.mockReset();
   });
 
   afterEach(() => cleanup());
@@ -147,5 +165,132 @@ describe("SearchPage", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
     expect(screen.getByText(/connection issue/i)).toBeTruthy();
+  });
+
+  /* A meta failure used to be a dead end: the form is gated on `meta`, so the
+   * note was the entire page and there was no way back without a reload. */
+  it("offers a retry when metadata fails, and recovers on the second attempt", async () => {
+    apiMocks.getMeta.mockRejectedValueOnce(new Error("API unreachable"));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByRole("button", { name: /run match/i })).toBeTruthy();
+    expect(apiMocks.getMeta).toHaveBeenCalledTimes(2);
+  });
+
+  /* The range inputs each wrapped their caption and live value in one <label>,
+   * so the accessible name was "Candidates retrieved10" and changed mid-drag. */
+  it("names the depth sliders without their live value", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    renderPage();
+
+    const slider = await screen.findByRole("slider", { name: "Candidates retrieved" });
+    expect(slider.getAttribute("aria-valuetext")).toBe("10 creators");
+    expect(screen.getByRole("slider", { name: "Final shortlist" })).toBeTruthy();
+  });
+
+  it("names the goal field from its caption, not the character counter", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    renderPage();
+
+    const textarea = await screen.findByLabelText(/promoting/i);
+    expect(textarea.getAttribute("aria-labelledby")).toBe("goal-label");
+    expect(textarea.getAttribute("aria-describedby")).toBe("goal-count");
+
+    fireEvent.change(textarea, { target: { value: "high-energy at-home strength training" } });
+    expect(screen.getByRole("textbox", { name: "What are you promoting?" })).toBeTruthy();
+  });
+
+  /* Every job is created `queued` (manager.py:55) and only advances to
+   * `embedding` when a worker picks it up, so on a free tier that is where
+   * every user's first poll lands. The old `findIndex` returned -1 there and
+   * the state machine had no branch for a negative index, so all four steps
+   * rendered pending: four grey bars under "Waiting to start". */
+  it("shows a live pipeline while the job is still queued", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    matchJobState.job = makeJob("queued");
+    matchJobState.isRunning = true;
+    const { container } = renderPage();
+
+    await screen.findByLabelText(/promoting/i);
+    expect(container.querySelectorAll(".pipeline-step-active")).toHaveLength(1);
+    expect(container.querySelectorAll(".pipeline-step-pending")).toHaveLength(3);
+  });
+
+  it("does not fabricate completed steps for a stage it cannot place", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    matchJobState.job = makeJob("some_future_stage");
+    matchJobState.isRunning = true;
+    const { container } = renderPage();
+
+    await screen.findByLabelText(/promoting/i);
+    // An unknown stage must not read as "almost finished" (which clamping to
+    // the last index produced) nor as "nothing is happening".
+    expect(container.querySelectorAll(".pipeline-step-complete")).toHaveLength(0);
+    expect(container.querySelectorAll(".pipeline-step-active")).toHaveLength(1);
+  });
+
+  it("marks every earlier step complete as the run advances", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    matchJobState.job = makeJob("ranking");
+    matchJobState.isRunning = true;
+    const { container } = renderPage();
+
+    await screen.findByLabelText(/promoting/i);
+    expect(container.querySelectorAll(".pipeline-step-complete")).toHaveLength(2);
+    expect(container.querySelectorAll(".pipeline-step-active")).toHaveLength(1);
+    expect(container.querySelectorAll(".pipeline-step-pending")).toHaveLength(1);
+  });
+
+  it("marks the last step as the failure point when a run dies", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    matchJobState.job = makeJob("failed", "failed");
+    matchJobState.error = "The backend rejected the request.";
+    const { container } = renderPage();
+
+    await screen.findByLabelText(/promoting/i);
+    expect(container.querySelectorAll(".pipeline-step-error")).toHaveLength(1);
+    expect(container.querySelectorAll(".pipeline-step-active")).toHaveLength(0);
+  });
+
+  /* The blank-gap regression.
+   *
+   * The job reports success before its shortlist is fetched. The empty state
+   * rendered only when there was no job AND no run, and the results only when a
+   * run had loaded, so that window rendered nothing at all -- a bare gap under
+   * the pipeline for as long as the fetch took. */
+  it("shows a loading state between a successful job and the loaded run", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    // Resolved but never settled, so the run stays unloaded.
+    apiMocks.getRun.mockReturnValue(new Promise(() => {}));
+    matchJobState.job = { status: "succeeded", stage: "complete", outcome: "match", run_id: "run-1" };
+    renderPage();
+
+    await screen.findByLabelText(/promoting/i);
+
+    expect(await screen.findByText("Loading your shortlist")).toBeTruthy();
+    expect(screen.queryByText("Set a brief.")).toBeNull();
+  });
+
+  it("does not show the loading state once the run has arrived", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    apiMocks.getRun.mockResolvedValue({
+      run_id: "run-1",
+      created_at: "2026-01-01T00:00:00Z",
+      brief: { goal: "yoga for beginners", platform: "Any", audience: "", vibe: "" },
+      summary: { n_results: 1, avg_match_pct: 70, n_strong: 1, n_weak: 0, avg_engagement_pct: 4, median_followers: 1000 },
+      warnings: [],
+      candidates: [],
+      ranked: [],
+    });
+    matchJobState.job = { status: "succeeded", stage: "complete", outcome: "match", run_id: "run-1" };
+    renderPage();
+
+    await screen.findByLabelText(/promoting/i);
+    await waitFor(() => expect(screen.getByText(/yoga for beginners/)).toBeTruthy());
+    expect(screen.queryByText("Loading your shortlist")).toBeNull();
   });
 });
