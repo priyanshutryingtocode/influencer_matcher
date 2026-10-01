@@ -67,6 +67,11 @@ export function SearchPage() {
   const [exporting, setExporting] = useState(false);
   const [metaAttempt, setMetaAttempt] = useState(0);
   const { job, error, isRunning, start } = useMatchJob();
+  /* True once the user has submitted anything, whatever the outcome. The
+   * workspace distinguishes "nothing here yet" from "your run failed" -- the
+   * hook nulls `job` on failure, so keying off `job` alone made the first-run
+   * empty state reappear over the error. */
+  const [hasStarted, setHasStarted] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -115,6 +120,7 @@ export function SearchPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setHasStarted(true);
     setRun(null);
     setRunError(null);
     await start(brief, { top_k: topK, top_n: topN });
@@ -234,7 +240,10 @@ export function SearchPage() {
           <div className="run-workspace">
             {job && <RunStatus job={job} isRunning={isRunning} />}
             {(error || runError) && <ErrorNote title="Request issue">{error ?? runError}</ErrorNote>}
-            {!job && !run && <EmptyWorkspace />}
+            {/* `hasStarted` records that a submit happened, which survives the
+              * hook clearing `job` on failure. The `!job` clause covers a job
+              * restored without a local submit. */}
+            {!hasStarted && !job && !run && <EmptyWorkspace />}
             {job?.outcome === "no_results" && <div className="empty-state"><span className="empty-index">NO MATCH</span><h2>Try a wider platform.</h2><p>No creators came back for this filter. Switch to Any or adjust the brief.</p></div>}
             {awaitingRun && <LoadingResults />}
             {run && (

@@ -256,6 +256,31 @@ describe("SearchPage", () => {
     expect(container.querySelectorAll(".pipeline-step-active")).toHaveLength(0);
   });
 
+  /* useMatchJob nulls `job` on failure, so `!job && !run` was true again after
+   * a failed run and the first-run "Set a brief." empty state rendered
+   * underneath the error -- reading as if the app had ignored the brief. */
+  it("does not show the first-run empty state after a failed run", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    renderPage();
+    const textarea = await screen.findByLabelText(/promoting/i);
+    fireEvent.change(textarea, { target: { value: "high-energy at-home strength training" } });
+
+    // The hook reports the failure by clearing `job` and setting `error`.
+    matchJobState.error = "The match request failed.";
+    fireEvent.click(screen.getByRole("button", { name: /run match/i }));
+
+    expect(await screen.findByText(/match request failed/i)).toBeTruthy();
+    expect(screen.queryByText(/Set a brief\./)).toBeNull();
+  });
+
+  it("still shows the empty state before anything has been submitted", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    renderPage();
+
+    await screen.findByLabelText(/promoting/i);
+    expect(screen.getByText(/Set a brief\./)).toBeTruthy();
+  });
+
   /* The blank-gap regression.
    *
    * The job reports success before its shortlist is fetched. The empty state
@@ -266,6 +291,8 @@ describe("SearchPage", () => {
     apiMocks.getMeta.mockResolvedValue(makeMeta());
     // Resolved but never settled, so the run stays unloaded.
     apiMocks.getRun.mockReturnValue(new Promise(() => {}));
+    // A job exists without the user having pressed submit in this render, so
+    // the workspace must trust the job, not the local submit flag.
     matchJobState.job = { status: "succeeded", stage: "complete", outcome: "match", run_id: "run-1" };
     renderPage();
 
