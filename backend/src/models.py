@@ -18,7 +18,8 @@ class CreatorSignals:
 
     Fields are set in the same order the ranking prompt may cite them, and
     `Influencer.corpus_text` still reads them, so moving them between tables
-    did not change the embedded text.
+    did not change the embedded text -- which is what keeps every cached
+    vector valid across the split.
     """
 
     creator_id: int
@@ -83,18 +84,6 @@ class Influencer:
             audience_top_countries=list(self.audience_top_countries),
         )
 
-    def apply_signals(self, signals: CreatorSignals) -> None:
-        """Copy a signal row onto this creator, as read from the join."""
-        self.content_style = signals.content_style
-        self.audience_age = signals.audience_age
-        self.audience_gender = signals.audience_gender
-        self.audience_country = signals.audience_country
-        self.brand_collaborations = list(signals.brand_collaborations)
-        self.reach_ratio = signals.reach_ratio
-        self.sponsored_ratio = signals.sponsored_ratio
-        self.growth_trend = signals.growth_trend
-        self.audience_top_countries = list(signals.audience_top_countries)
-
     def corpus_text(self) -> str:
         """The text this creator is embedded as, and the text a reason may cite.
 
@@ -103,9 +92,10 @@ class Influencer:
         as evidence, so retrieval can match on it and a grounded reason can
         quote it. Changing this invalidates every cached vector.
 
-        The signal fields are read through the same accessors whether they live
-        on this row or in creator_signals, which is what let those columns move
-        to their own table without invalidating a single cached vector.
+        The signal fields are emitted in `corpus_text` from this row either way,
+        which is what let those columns move to `creator_signals` without
+        invalidating a single cached vector. Retrieval reads them through the
+        LEFT JOIN in `vector_store.search`, not through an accessor.
         """
         facts = [
             f"Creator {self.handle} on {self.platform}, based in {self.city}, {self.country}.",

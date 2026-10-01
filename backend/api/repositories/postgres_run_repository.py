@@ -43,11 +43,6 @@ class PostgresRunRepository:
                         (migration.name,),
                     )
 
-    def check_schema(self) -> None:
-        with self._connection_factory() as conn:
-            conn.execute("SELECT 1 FROM match_runs LIMIT 1").fetchone()
-            conn.execute("SELECT 1 FROM match_jobs LIMIT 1").fetchone()
-
     def create(self, record: dict, owner_id=None) -> dict:
         owner = _as_uuid(owner_id or record.get("owner_id"))
         with self._connection_factory() as conn:

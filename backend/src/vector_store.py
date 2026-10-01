@@ -1,6 +1,7 @@
 """Postgres + pgvector: the persistent home for influencer embeddings."""
 
 import hashlib
+import logging
 import threading
 
 import numpy as np
@@ -10,6 +11,8 @@ from psycopg_pool import ConnectionPool
 
 from . import config
 from .models import Influencer
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TABLE = "influencers"
 
@@ -26,8 +29,10 @@ def _configure_connection(conn: psycopg.Connection) -> None:
     register_vector(conn)
     try:
         conn.execute("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', false)")
-    except Exception:
-        pass 
+    except psycopg.Error:
+        # Without iterative scan a filtered query returns fewer rows than asked
+        # for. Worth a log; the query is still correct, just smaller.
+        logger.debug("hnsw.iterative_scan unavailable", exc_info=True)
 
 
 def _get_pool() -> ConnectionPool:
@@ -81,19 +86,10 @@ CREATE TABLE IF NOT EXISTS {table} (
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embed_model TEXT;
 ALTER TABLE {table} ADD COLUMN IF NOT EXISTS content_hash TEXT;
 ALTER TABLE {table} DROP COLUMN IF EXISTS rate;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS name TEXT;
 -- The single-label taxonomy is gone; topic tags are the only topical signal.
 -- DROP (not SET NULL) because nothing reads these columns any more.
 ALTER TABLE {table} DROP COLUMN IF EXISTS niche;
 ALTER TABLE {table} DROP COLUMN IF EXISTS secondary_niches;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS country TEXT;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS language TEXT;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS average_views INTEGER;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS average_likes INTEGER;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS average_comments INTEGER;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS verified BOOLEAN;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS posts_per_week INTEGER;
-ALTER TABLE {table} ADD COLUMN IF NOT EXISTS account_age_years INTEGER;
 -- Inferred characteristics live in creator_signals (migration 007), not here.
 ALTER TABLE {table} DROP COLUMN IF EXISTS content_style;
 ALTER TABLE {table} DROP COLUMN IF EXISTS audience_age;
@@ -212,8 +208,9 @@ def _refresh_stats(conn: psycopg.Connection, table: str = DEFAULT_TABLE) -> None
     latency on the first unfiltered (platform=Any) query."""
     try:
         conn.execute(f"ANALYZE {table}")
-    except Exception:
-        pass
+    except psycopg.Error:
+        # Its absence only costs latency on the first unfiltered query.
+        logger.debug("ANALYZE %s failed", table, exc_info=True)
 
 
 def _content_hash(text: str) -> str:
@@ -329,8 +326,9 @@ def search(
         conn.execute(
             "SELECT set_config('hnsw.ef_search', %s, false)", (str(ef_search),)
         )
-    except Exception:
-        pass
+    except psycopg.Error:
+        # ef_search is a tuning knob; the query is correct without it.
+        logger.debug("hnsw.ef_search tuning failed", exc_info=True)
 
     # One LEFT JOIN, not a second query: retrieval returns top_k rows and a
     # per-row signal fetch would be top_k round trips. The join is on the

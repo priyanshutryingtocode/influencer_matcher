@@ -98,12 +98,15 @@ TAG_GROUPS = {
              "non-fiction", "habits", "discipline", "mindset", "success", "quotes",
              "plants", "DIY", "renovation", "activities"],
     "mobility": ["EVs", "supercars", "motorcycles", "mods", "watches", "cafes",
-                 "beans", "brewing", "espresso", "latte art", "reviews", "kinetic"],
+                 "beans", "brewing", "espresso", "latte art", "reviews"],
 }
-# Any group entry that is not a real tag would make its floor unsatisfiable.
-_KNOWN_TAGS = set(TOPIC_TAGS)
-for _group, _tags in list(TAG_GROUPS.items()):
-    TAG_GROUPS[_group] = [t for t in _tags if t in _KNOWN_TAGS]
+# Asserted rather than filtered. The filter that used to be here silently
+# dropped unknown entries at import, which is how "kinetic" sat in the mobility
+# group for as long as it did. Every entry must now be a real tag, or the
+# balanced floor for that cell is unsatisfiable.
+_unknown = {t for tags in TAG_GROUPS.values() for t in tags} - set(TOPIC_TAGS)
+if _unknown:
+    raise ValueError(f"TAG_GROUPS contains tags that are not in TOPIC_TAGS: {sorted(_unknown)}")
 
 GROUP_TAGS = {tag: group for group, tags in TAG_GROUPS.items() for tag in tags}
 
@@ -138,9 +141,9 @@ BRAND_TAGS = {
     "apparel": ["Uniqlo", "Everlane", "Zara", "Levi's", "ThredUp", "IKEA"],
     "fitness": ["Nike", "Adidas", "Gymshark", "Lululemon", "WHOOP", "ClassPass"],
     "life": ["Petco", "Chewy", "Target", "IKEA", "Whole Foods", "Staples", "Costco"],
-    "home": ["IKEA", "Wayfair", "Herman Miller", "Muji", "Dyson"],
-    "education": ["Coursera", "Udemy", "MasterClass", "Skillshare", "Duolingo"],
-    "health": ["Calm", "Headspace", "Nike", "WHOOP", "Noom"],
+    # mobility had no pool, so every EV/supercar/motorcycle creator fell through
+    # to ALL_BRANDS and came out having worked with Coursera.
+    "mobility": ["Dometic", "Garmin", "Michelin", "Shell", "Tire Rack", "Zipcar"],
 }
 ALL_BRANDS = sorted({brand for brands in BRAND_TAGS.values() for brand in brands})
 BIOS = [
@@ -616,7 +619,7 @@ def _stable_suffix(key: tuple) -> str:
     return hashlib.sha256("|".join(str(p) for p in key).encode("utf-8")).hexdigest()[:6]
 
 
-def _slot_plan(count: int, floor: int, min_per_group: int) -> list[tuple[str, str, int]]:
+def _slot_plan(count: int, floor: int) -> list[tuple[str, str, int]]:
     """The (group, platform, slot) cells to fill, in a stable order.
 
     Ordered by (slot, group, platform) -- one creator per cell at a time,
@@ -629,20 +632,13 @@ def _slot_plan(count: int, floor: int, min_per_group: int) -> list[tuple[str, st
     """
     groups = list(TAG_GROUPS)
     platforms = list(PLATFORMS)
-    group_floor = len(platforms) * floor
-    if min_per_group > group_floor:
-        raise ValueError(
-            f"min_per_group={min_per_group} cannot be met: a uniform "
-            f"floor of {floor} per (group, platform) cell already gives each "
-            f"group {group_floor} creators"
-        )
     plan = [
         (group, platform, slot)
         for slot in range(floor)
         for group in groups
         for platform in platforms
     ]
-    return plan[:count]
+    return plan
 
 
 def generate_influencers(count: int = 60, seed: int = 42) -> list[Influencer]:
@@ -669,7 +665,6 @@ def generate_influencers(count: int = 60, seed: int = 42) -> list[Influencer]:
 def generate_balanced_influencers(
     count: int = 60,
     seed: int = 42,
-    min_per_group: int = 5,
     min_per_group_platform: int = 3,
 ) -> list[Influencer]:
     """Generate influencers with balanced topic-group x platform coverage.
@@ -700,7 +695,7 @@ def generate_balanced_influencers(
         )
 
     plan = _extend_plan(
-        _slot_plan(count, min_per_group_platform, min_per_group),
+        _slot_plan(count, min_per_group_platform),
         count, groups, platforms,
     )
 

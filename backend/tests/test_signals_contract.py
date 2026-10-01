@@ -55,6 +55,22 @@ OLD_CORPUS_TEXT = (
 )
 
 
+# Moved out of src/models.py: nothing in production called it, but the
+# contract it checks -- that splitting signals into their own table did not
+# change the text that was embedded -- is the reason this file exists.
+def apply_signals(creator, signals):
+    """Copy a signal row onto a creator, as read from the join."""
+    creator.content_style = signals.content_style
+    creator.audience_age = signals.audience_age
+    creator.audience_gender = signals.audience_gender
+    creator.audience_country = signals.audience_country
+    creator.brand_collaborations = list(signals.brand_collaborations)
+    creator.reach_ratio = signals.reach_ratio
+    creator.sponsored_ratio = signals.sponsored_ratio
+    creator.growth_trend = signals.growth_trend
+    creator.audience_top_countries = list(signals.audience_top_countries)
+
+
 def test_corpus_text_is_unchanged_by_the_signals_split():
     assert make_creator().corpus_text() == OLD_CORPUS_TEXT
 
@@ -85,7 +101,7 @@ def test_apply_signals_round_trips_corpus_text():
         tags=list(original.tags), bio=original.bio, name=original.name, country=original.country,
     )
     assert restored.corpus_text() != OLD_CORPUS_TEXT
-    restored.apply_signals(original.signals())
+    apply_signals(restored, original.signals())
     assert restored.corpus_text() == OLD_CORPUS_TEXT
 
 

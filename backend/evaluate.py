@@ -40,7 +40,6 @@ BACKEND_ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES = BACKEND_ROOT / "data" / "evaluation_cases.json"
 DEFAULT_OUTPUT = BACKEND_ROOT / "reports" / "evaluation-report.json"
 DEFAULT_QUERY_CACHE = BACKEND_ROOT / ".embed-cache"
-ANY_PLATFORM = "*"
 
 
 def default_query_cache_path() -> Path:
@@ -114,29 +113,6 @@ def tag_precision(items, expected_tags: set[str]) -> float:
     if not items or not expected_tags:
         return 0.0
     return sum(bool(expected_tags & set(item.tags)) for item in items) / len(items)
-
-
-def pool_sizes(conn, table: str = vector_store.DEFAULT_TABLE) -> dict[tuple[str, str], int]:
-    """Creator counts per (tag, platform), plus a per-tag total under "*".
-
-    The generator gives every topic-group/platform cell a floor, so on a small
-    corpus a filtered query can only ever return as many on-topic creators as
-    that cell contains. Reporting the pool lets the caller say how much of the
-    achievable set was actually found. Tags are unnested so this stays one
-    grouped query over the whole index, costing nothing per case.
-    """
-    rows = conn.execute(
-        f"SELECT tag, platform, COUNT(DISTINCT id) FROM {table}, unnest(tags) AS tag "
-        f"GROUP BY tag, platform"
-    ).fetchall()
-    sizes: dict[tuple[str, str], int] = {}
-    totals: dict[str, int] = {}
-    for tag, platform, count in rows:
-        sizes[(tag, platform)] = int(count)
-        totals[tag] = totals.get(tag, 0) + int(count)
-    for tag, total in totals.items():
-        sizes[(tag, ANY_PLATFORM)] = total
-    return sizes
 
 
 def pool_for(

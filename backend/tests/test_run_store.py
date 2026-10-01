@@ -202,8 +202,8 @@ def test_quota_and_outage_warnings_say_different_things():
 
     from api.serialization import build_warnings
 
-    quota = build_warnings(brief, [], ranked_quota)[0]
-    outage = build_warnings(brief, [], ranked_outage)[0]
+    quota = build_warnings(ranked_quota)[0]
+    outage = build_warnings(ranked_outage)[0]
 
     assert quota["code"] == outage["code"] == "RANKING_FALLBACK"
     assert "quota" in quota["message"].lower()
@@ -226,6 +226,6 @@ def test_a_quota_fallback_is_still_an_error_severity():
 
     run = make_run(n=1)
     warning = build_warnings(
-        run["brief"], [], [{"source": "fallback", "fallback_reason": f"{QUOTA_REASON_TAG}: spent"}]
+        [{"source": "fallback", "fallback_reason": f"{QUOTA_REASON_TAG}: spent"}]
     )[0]
     assert warning["severity"] == "error"

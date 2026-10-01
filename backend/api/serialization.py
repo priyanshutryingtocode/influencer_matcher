@@ -81,11 +81,7 @@ def ranked_to_snapshot(
     ).model_dump(mode="json")
 
 
-def build_warnings(
-    brief: Brief,
-    candidates: list[Influencer],
-    ranked: list[dict],
-) -> list[dict]:
+def build_warnings(ranked: list[dict]) -> list[dict]:
     warnings: list[Warning] = []
     fallback = [item for item in ranked if item.get("source") == "fallback"]
     if fallback:
@@ -122,7 +118,7 @@ def build_warnings(
     return [warning.model_dump(mode="json") for warning in warnings]
 
 
-def build_summary(candidates: list[Influencer], ranked: list[dict], brief: Brief) -> dict:
+def build_summary(candidates: list[Influencer], ranked: list[dict]) -> dict:
     by_id = {candidate.id: candidate for candidate in candidates}
     ranked_candidates = [by_id[item["id"]] for item in ranked if item.get("id") in by_id]
     similarities = [item.similarity for item in ranked_candidates if item.similarity is not None]
@@ -166,8 +162,8 @@ def build_run_record(result: dict, run_id: UUID, indexed_count: int | None = Non
             "candidates": candidate_snapshots,
             "ranked": ranked_snapshots,
         },
-        "warnings": build_warnings(brief, candidates, ranked),
-        "summary": build_summary(candidates, ranked, brief),
+        "warnings": build_warnings(ranked),
+        "summary": build_summary(candidates, ranked),
     }
 
 

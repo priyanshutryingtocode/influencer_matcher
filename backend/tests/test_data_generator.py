@@ -58,6 +58,19 @@ def fingerprint(c) -> tuple:
 
 # ------------------------------------------------------------- determinism
 
+def apply_signals(creator, signals) -> None:
+    """Lives here, not in src/models.py: nothing in production called it."""
+    creator.content_style = signals.content_style
+    creator.audience_age = signals.audience_age
+    creator.audience_gender = signals.audience_gender
+    creator.audience_country = signals.audience_country
+    creator.brand_collaborations = list(signals.brand_collaborations)
+    creator.reach_ratio = signals.reach_ratio
+    creator.sponsored_ratio = signals.sponsored_ratio
+    creator.growth_trend = signals.growth_trend
+    creator.audience_top_countries = list(signals.audience_top_countries)
+
+
 def test_same_seed_reproduces_exactly():
     a = generate_balanced_influencers(count=SMALL, seed=5)
     b = generate_balanced_influencers(count=SMALL, seed=5)
@@ -304,14 +317,6 @@ def test_balanced_too_small_raises():
         generate_balanced_influencers(count=10)
 
 
-def test_impossible_group_floor_raises():
-    """A group floor above what uniform cells can supply must fail loudly."""
-    with pytest.raises(ValueError, match="cannot be met"):
-        generate_balanced_influencers(
-            count=270, min_per_group=500, min_per_group_platform=3
-        )
-
-
 def test_balanced_respects_requested_fields():
     creators = generate_balanced_influencers(count=SMALL, seed=42)
     assert len(creators) == SMALL
@@ -346,7 +351,7 @@ def test_every_creator_has_a_signal_row():
 def test_signals_round_trip_through_apply():
     original = generate_influencers(count=1, seed=8)[0]
     copy = generate_influencers(count=1, seed=8)[0]
-    copy.apply_signals(original.signals())
+    apply_signals(copy, original.signals())
     assert copy.content_style == original.content_style
     assert copy.brand_collaborations == original.brand_collaborations
     assert copy.reach_ratio == original.reach_ratio

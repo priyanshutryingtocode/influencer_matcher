@@ -107,13 +107,11 @@ def default_cache_path() -> Path:
     return CACHE_DIR / f"{safe_model}-{config.EMBED_DIMENSIONS}d.jsonl"
 
 
-def ensure_indexed(args) -> bool:
+def ensure_indexed(args) -> None:
     """Only regenerate + re-embed if the table is empty or --reindex was
     passed. Generation and embedding happen entirely before any database
     write -- if anything fails partway (bad key, network, quota), nothing
     here has touched the database yet, so existing indexed data survives.
-
-    Returns False when this was an embed-only run that wrote nothing.
     """
     embed_only = bool(args.limit) and not args.index_only
 
@@ -122,9 +120,7 @@ def ensure_indexed(args) -> bool:
             existing = vector_store.count_influencers(conn)
         if existing and not args.reindex:
             print(f"Found {existing} indexed profiles, skipping re-embedding.")
-            return True
-    else:
-        existing = 0
+            return
 
     print("Generating synthetic influencer database...")
     if args.balanced:
@@ -160,7 +156,7 @@ def ensure_indexed(args) -> bool:
     if embed_only:
         print("--limit was used, so the database was left untouched. "
               "Re-run without --limit to write the index.")
-        return False
+        return
 
     print("Writing to the database (atomic replace)...")
     with vector_store.get_connection() as conn:

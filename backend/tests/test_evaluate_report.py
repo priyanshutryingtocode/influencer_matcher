@@ -7,7 +7,7 @@ Pure functions only: no database, no API.
 
 import pytest
 
-from evaluate import ceiling_precision, pool_for, pool_sizes, recall_of_ceiling, tag_precision
+from evaluate import ceiling_precision, pool_for, recall_of_ceiling, tag_precision
 
 
 class FakeConn:
@@ -26,24 +26,6 @@ class FakeConn:
 
     def fetchone(self):
         return (self.rows[0][2] if len(self.rows[0]) > 2 else self.rows[0][1],)
-
-
-def test_pool_sizes_unnests_tags_and_folds_platform_totals():
-    conn = FakeConn([
-        ("gym", "TikTok", 3),
-        ("gym", "Instagram", 4),
-        ("skincare", "Instagram", 3),
-    ])
-
-    sizes = pool_sizes(conn)
-
-    assert sizes[("gym", "TikTok")] == 3
-    assert sizes[("skincare", "Instagram")] == 3
-    assert sizes[("gym", "*")] == 7   # 3 + 4 across platforms
-    assert sizes[("skincare", "*")] == 3
-    assert "unnest(tags)" in conn.query
-    assert "GROUP BY tag, platform" in conn.query
-    assert "DISTINCT" in conn.query
 
 
 def test_pool_for_counts_the_union_of_matching_tags():
