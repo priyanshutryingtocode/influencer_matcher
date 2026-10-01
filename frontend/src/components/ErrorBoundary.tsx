@@ -1,6 +1,8 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 
+import { ErrorNote } from "./SystemNote";
+
 interface ErrorBoundaryProps {
   children: ReactNode;
 }
@@ -38,18 +40,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (!error) return this.props.children;
     return (
       <div className="page-section">
-        <div className="system-note system-note-error" role="alert">
-          <span className="system-note-signal" aria-hidden="true" />
-          <strong>Something broke on this page</strong>
-          <span>
-            {error.message || "An unexpected error stopped the page from rendering."}
-          </span>
-          <div className="note-actions">
+        <ErrorNote
+          title="Something broke on this page"
+          action={(
             <button className="btn btn-secondary" type="button" onClick={this.reset}>
               Try again
             </button>
-          </div>
-        </div>
+          )}
+        >
+          {error.message || "An unexpected error stopped the page from rendering."}
+        </ErrorNote>
       </div>
     );
   }

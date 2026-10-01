@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../api/client";
-import { ErrorNote } from "../components/ErrorNote";
+import { ErrorNote, InfoNote } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
 import { SummaryMetrics } from "../components/RunSummary";
+import { WarningBanner } from "../components/WarningBanner";
 import { formatDate } from "../format";
 import type { Comparison, RunDetail, RunListItem } from "../types";
 
@@ -17,6 +18,7 @@ export function ComparePage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isComparing, setIsComparing] = useState(false);
+  const [listAttempt, setListAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -32,7 +34,7 @@ export function ComparePage() {
       })
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [listAttempt]);
 
   useEffect(() => {
     if (!runA || !runB || runA === runB) {
@@ -68,6 +70,21 @@ export function ComparePage() {
   }
 
   if (isLoading) return <div className="loading-panel page-section">Loading saved runs...</div>;
+  // A failed list is not an empty list. Rendering the "save two shortlists"
+  // state underneath the error told the user to go and do something they had
+  // already done, and offered no way back.
+  if (error && !runs.length) {
+    return (
+      <section className="page-section">
+        <ErrorNote
+          title="Comparison issue"
+          action={<button className="btn btn-ghost" type="button" onClick={() => setListAttempt((n) => n + 1)}>Retry</button>}
+        >
+          {error}
+        </ErrorNote>
+      </section>
+    );
+  }
   if (runs.length < 2) return <div className="empty-state page-section"><span className="empty-index">COMPARE</span><h1>Two runs make a comparison.</h1><p>Save at least two shortlists to see overlap, quality changes, and rank movement.</p></div>;
 
   return (
@@ -85,7 +102,7 @@ export function ComparePage() {
         <RunSelect label="Run B" value={runB} runs={runs} onChange={setRunB} />
       </div>
 
-      {runA === runB && <div className="system-note system-note-info" role="status"><span className="system-note-signal" aria-hidden="true" /><strong>Choose two different runs</strong><span>The comparison will appear here.</span></div>}
+      {runA === runB && <InfoNote title="Choose two different runs">The comparison will appear here.</InfoNote>}
       {isComparing && <div className="compare-loading" aria-live="polite"><span className="loading-bar" />Updating comparison...</div>}
 
       {comparison && !isComparing && (
@@ -137,7 +154,9 @@ function Delta({ label, valueA, valueB, suffix = "" }: { label: string; valueA: 
 }
 
 function OverlapList({ comparison, details }: { comparison: Comparison; details: { a: RunDetail | null; b: RunDetail | null } }) {
-  if (!comparison.shared_creators.length) return <div className="system-note system-note-info" role="status"><span className="system-note-signal" aria-hidden="true" /><strong>No overlap</strong><span>These runs do not share a ranked creator.</span></div>;
+  if (!comparison.shared_creators.length) {
+    return <InfoNote title="No overlap">These runs do not share a ranked creator.</InfoNote>;
+  }
   return (
     <div className="overlap-list">
       <div className="section-heading compact"><div><p className="eyebrow">Overlap</p><h2>Creators in both runs</h2></div><span className="section-count">{comparison.shared_creators.length} shared</span></div>
@@ -157,6 +176,10 @@ function CompareColumn({ title, detail, summary, sharedKeys }: { title: string; 
   return (
     <div className="compare-column">
       <div className="compare-column-heading"><span className="eyebrow">{title}</span>{detail && <span>{detail.brief.goal}</span>}</div>
+      {/* These columns were the only place in the app showing a run's quality
+       * without its warnings, so a quota fallback on one side of the
+       * comparison looked identical to a clean run. */}
+      {detail && <WarningBanner warnings={detail.warnings} />}
       <SummaryMetrics summary={summary} compact />
       {detail
         ? <ResultList run={detail} highlightKeys={sharedKeys} className="compare-result-list" />

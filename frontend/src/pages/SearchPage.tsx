@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { api, ApiError } from "../api/client";
-import { ErrorNote } from "../components/ErrorNote";
+import { ErrorNote } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
 import { RunContext } from "../components/RunContext";

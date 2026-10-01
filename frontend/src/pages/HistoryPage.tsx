@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, ApiError } from "../api/client";
-import { ErrorNote } from "../components/ErrorNote";
+import { ErrorNote } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
 import { RunContext } from "../components/RunContext";
@@ -46,7 +46,11 @@ export function HistoryPage() {
         eyebrow="History / Archive"
         title="Saved shortlists"
         description="A durable record of the briefs you have run and the creators you kept."
-        meta={<button className="btn btn-secondary" type="button" onClick={() => void refresh()}>Refresh</button>}
+        meta={(
+          <button className="btn btn-secondary" type="button" disabled={isLoading} onClick={() => void refresh()}>
+            {isLoading ? "Refreshing..." : "Refresh"}
+          </button>
+        )}
       />
 
       {(error || detailError) && <ErrorNote title="Archive issue">{error ?? detailError}</ErrorNote>}
@@ -72,7 +76,10 @@ export function HistoryPage() {
         </aside>
 
         <div className="history-detail">
-          {isOpening && <div className="empty-state"><h2>Opening shortlist</h2></div>}
+          {/* aria-busy/live: this replaced the detail pane with a heading, so a
+           * sighted user saw progress while a screen-reader user heard nothing
+           * and focus stayed on the ledger button they had just pressed. */}
+          {isOpening && <div className="empty-state" aria-live="polite" aria-busy="true"><h2>Opening shortlist</h2></div>}
           {!isOpening && selected && (
             <>
               <RunContext

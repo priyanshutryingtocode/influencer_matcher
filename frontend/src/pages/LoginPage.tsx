@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 
-import { ErrorNote } from "../components/ErrorNote";
+import { ErrorNote } from "../components/SystemNote";
 import { useAuth } from "../auth/AuthProvider";
 
 type AuthMode = "signin" | "signup";
@@ -111,7 +111,9 @@ export function LoginPage() {
               <button className="btn btn-primary" type="submit" disabled={isSubmitting}>
                 {isSubmitting ? "Working..." : mode === "signin" ? "Sign in to account" : "Create account"}
               </button>
-              {message && <p className="auth-message">{message}</p>}
+              {/* role="status" because the sibling error has role="alert", and
+                * without it "Account created. Check your email" was silent. */}
+              {message && <p className="auth-message" role="status">{message}</p>}
               {error && <p className="auth-error" role="alert">{error}</p>}
             </form>
           </>

@@ -1,7 +1,7 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ErrorNote } from "./ErrorNote";
+import { ErrorNote, InfoNote } from "./SystemNote";
 import { PageIntro } from "./PageIntro";
 import { ResultList } from "./ResultList";
 import { RunContext } from "./RunContext";
@@ -96,6 +96,50 @@ describe("RunContext", () => {
     expect(onExport).toHaveBeenCalledOnce();
   });
 
+  /* A double-click used to fire two downloads: the button was never disabled
+   * and the page held no in-flight state for it. */
+  it("disables the export button while a download is in flight", () => {
+    const onExport = vi.fn();
+    render(<RunContext brief={brief} createdAt="2026-09-27T10:00:00Z" label="Shortlist" exporting onExport={onExport} />);
+
+    const button = screen.getByRole("button", { name: "Exporting..." });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+
+    fireEvent.click(button);
+    expect(onExport).not.toHaveBeenCalled();
+  });
+
+  it("offers an action slot on an error note", () => {
+    const onRetry = vi.fn();
+    render(
+      <ErrorNote title="Connection issue" action={<button type="button" onClick={onRetry}>Retry</button>}>
+        The backend did not respond.
+      </ErrorNote>,
+    );
+
+    expect(screen.getByText("The backend did not respond.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  /* The tone used to be a per-call-site decision, so a failure could ship as
+   * role="status" and a piece of guidance as role="alert". One place decides
+   * now, and these pin the mapping. */
+  it("announces a failure and treats guidance as non-urgent", () => {
+    const failure = render(
+      <ErrorNote title="Request issue">The backend did not respond.</ErrorNote>,
+    );
+    expect(failure.getByRole("alert")).toBeTruthy();
+    expect(failure.container.querySelector(".system-note-error")).toBeTruthy();
+    failure.unmount();
+
+    const info = render(<InfoNote title="No overlap">These runs do not share a creator.</InfoNote>);
+    expect(info.container.querySelector(".system-note-info")).toBeTruthy();
+    expect(info.queryByRole("alert")).toBeNull();
+    expect(info.getByRole("status")).toBeTruthy();
+  });
+
   it("shows the free-text goal and omits empty optional refinements", () => {
     render(
       <RunContext
@@ -152,6 +196,22 @@ describe("ResultList", () => {
 
     expect(screen.getByText("@a")).toBeTruthy();
     expect(screen.queryByText("@gone")).toBeNull();
+  });
+
+  /* An empty ranked list, or one where every snapshot failed the join, used to
+   * render a bordered box with nothing inside it. */
+  it("explains an empty shortlist instead of rendering an empty box", () => {
+    render(<ResultList run={{ brief, candidates: [], ranked: [] }} />);
+
+    expect(screen.getByText(/no creators in this shortlist/i)).toBeTruthy();
+  });
+
+  it("distinguishes a missing snapshot from a genuinely empty shortlist", () => {
+    render(
+      <ResultList run={{ brief, candidates: [], ranked: [ranked(9, "TikTok:@gone", 1)] }} />,
+    );
+
+    expect(screen.getByText(/creator details are no longer available/i)).toBeTruthy();
   });
 
   it("highlights only the creators named by the key set", () => {
