@@ -313,7 +313,6 @@ function RangeControl({
   value,
   min,
   max,
-  unit = "creators",
   onChange,
 }: {
   id: string;
@@ -321,7 +320,6 @@ function RangeControl({
   value: number;
   min: number;
   max: number;
-  unit?: string;
   onChange: (value: number) => void;
 }) {
   const labelId = `${id}-label`;
@@ -339,7 +337,7 @@ function RangeControl({
         max={max}
         value={value}
         aria-labelledby={labelId}
-        aria-valuetext={`${value} ${unit}`}
+        aria-valuetext={`${value} creators`}
         onChange={(event) => onChange(Number(event.target.value))}
       />
     </label>

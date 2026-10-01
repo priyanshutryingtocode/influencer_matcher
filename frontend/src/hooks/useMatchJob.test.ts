@@ -25,12 +25,9 @@ function makeJob(overrides: Partial<MatchJob> = {}): MatchJob {
     job_id: "job-1",
     status: "queued",
     stage: "queued",
-    progress: {},
     run_id: null,
     outcome: null,
     error: null,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }

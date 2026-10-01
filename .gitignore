@@ -10,4 +10,6 @@ frontend/dist/
 frontend/.vite/
 backend/.embed-cache/
 frontend/.env.local
-.env.example
+# .env.example is a template of variable names with empty values for every
+# secret, so it is tracked. It was ignored here, which meant a fresh clone had
+# no starting point and discovered the variable names by reading the code.

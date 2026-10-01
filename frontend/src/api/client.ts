@@ -16,7 +16,7 @@ export const isApiConfigured = Boolean(baseUrl) || (import.meta.env.DEV && isLoc
 const backendWakeTimeoutMs = 120_000;
 /** A local API answers in milliseconds, so a long wait there is always a
  *  misconfiguration rather than a cold start. */
-export const localWakeTimeoutMs = 10_000;
+const localWakeTimeoutMs = 10_000;
 
 /** A free-tier instance sleeps after 15 minutes idle and needs roughly a minute
  *  to come back, so an unbounded fetch leaves the user on a spinner with
@@ -70,9 +70,6 @@ function timeoutMessage(timeoutMs: number): string {
 }
 
 async function request<T>(path: string, init?: RequestInit, options: RequestOptions = {}): Promise<T> {
-  if (import.meta.env.PROD && !isApiConfigured) {
-    throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
-  }
   const headers = await authenticatedHeaders(init);
   const timeoutMs = options.timeoutMs ?? defaultRequestTimeoutMs;
   const controller = new AbortController();
@@ -119,9 +116,6 @@ async function request<T>(path: string, init?: RequestInit, options: RequestOpti
 }
 
 async function probeBackend(timeoutMs = wakeTimeoutMs()): Promise<void> {
-  if (import.meta.env.PROD && !isApiConfigured) {
-    throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
-  }
   const target = apiTargetLabel();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -144,9 +138,6 @@ async function probeBackend(timeoutMs = wakeTimeoutMs()): Promise<void> {
 }
 
 async function downloadFile(path: string, filename: string) {
-  if (import.meta.env.PROD && !isApiConfigured) {
-    throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
-  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), slowRequestTimeoutMs);
   let response: Response;

@@ -18,12 +18,9 @@ export interface MatchJob {
   job_id: string;
   status: JobStatus;
   stage: string;
-  progress: Record<string, number>;
   run_id: string | null;
   outcome: "match" | "no_results" | null;
   error: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface Grounding {
@@ -40,23 +37,15 @@ export interface CreatorSnapshot {
   name: string;
   platform: string;
   city: string;
-  country: string;
   language: string;
   followers: number;
   engagement_pct: number;
-  average_views: number;
-  average_likes: number;
-  average_comments: number;
   verified: boolean;
-  posts_per_week: number;
-  account_age_years: number;
   content_style: string;
   audience_age: string;
   audience_gender: string;
-  audience_country: string;
   brand_collaborations: string[];
   tags: string[];
-  bio: string;
   similarity: number | null;
   /** Stored and displayable, but not quotable in a reason: these are not in
    *  the embedded profile text, so retrieval never searched on them. */
@@ -113,12 +102,9 @@ export interface RunListResponse {
 }
 
 export interface RunDetail {
-  schema_version: string;
   run_id: string;
   created_at: string;
   brief: Brief;
-  params: MatchParams;
-  pipeline: Record<string, unknown>;
   warnings: Warning[];
   summary: RunSummary;
   candidates: CreatorSnapshot[];
@@ -126,7 +112,6 @@ export interface RunDetail {
 }
 
 export interface Comparison {
-  run_ids: string[];
   summary_a: RunSummary;
   summary_b: RunSummary;
   shared_creators: Array<{ id: number; creator_key: string; handle: string }>;
@@ -154,11 +139,5 @@ export interface Meta {
   index: {
     status: "ready" | "unavailable" | "reindex_required";
     count: number;
-    embedding_model: string;
-    embed_dimensions: number;
-  };
-  ranking: {
-    model: string;
-    fit_levels: FitLevel[];
   };
 }
