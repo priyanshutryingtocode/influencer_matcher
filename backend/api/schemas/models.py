@@ -30,8 +30,8 @@ class BriefPayload(BaseModel):
         validation_alias=AliasChoices("goal", "niche"),
     )
     platform: str = Field(default="Any", min_length=1, max_length=50)
-    audience: str = Field(default="", max_length=300)
-    vibe: str = Field(default="", max_length=500)
+    audience: str = Field(default="", max_length=config.AUDIENCE_MAX_LENGTH)
+    vibe: str = Field(default="", max_length=config.VIBE_MAX_LENGTH)
 
     def to_domain(self):
         from src.models import Brief

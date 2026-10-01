@@ -61,6 +61,9 @@ DEFAULT_TOP_N_RANKED = 5
 # brief was a short fixed label still validate when they are read back.
 MIN_GOAL_LENGTH = int(os.environ.get("MIN_GOAL_LENGTH", "8"))
 MAX_GOAL_LENGTH = int(os.environ.get("MAX_GOAL_LENGTH", "600"))
+# Advertised by /meta and enforced by BriefPayload, so they cannot drift.
+AUDIENCE_MAX_LENGTH = 300
+VIBE_MAX_LENGTH = 500
 if MIN_GOAL_LENGTH < 1 or MAX_GOAL_LENGTH < MIN_GOAL_LENGTH:
     raise RuntimeError("MIN_GOAL_LENGTH must be positive and no greater than MAX_GOAL_LENGTH")
 

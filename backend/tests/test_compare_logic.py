@@ -60,6 +60,22 @@ def test_summarize_run_ignores_stored_summary_from_old_schema():
     assert summarize_run(run)["avg_match_pct"] == 40.0
 
 
+def test_summary_counts_and_denominator_use_the_same_result_set():
+    """A ranked entry with no snapshot must not inflate the fit tallies.
+
+    The two implementations disagreed here: n_results counted the joined set
+    while n_strong/n_weak counted every ranked entry, so a run with a dangling
+    entry could report more strong fits than results.
+    """
+    run = make_run(fits=["strong", "weak"], tags=[["gym"], ["skincare"]], similarities=[0.9, 0.3])
+    run["result"]["ranked"].append({"id": str(uuid4()), "fit": "strong", "creator_key": "tiktok:ghost"})
+    run.pop("summary")
+    summary = summarize_run(run)
+    assert summary["n_results"] == 2
+    assert summary["n_strong"] == 1
+    assert summary["n_weak"] == 1
+
+
 def test_shared_creators_only_counts_ranked_results():
     run_a = make_run(["strong"], [["gym"], ["mindfulness"]])
     run_b = make_run(["strong"], [["mindfulness"], ["gym"]])

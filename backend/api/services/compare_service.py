@@ -1,44 +1,26 @@
 from __future__ import annotations
 
-from statistics import median
+from api.serialization import SUMMARY_KEYS, build_summary, candidate_key
 
 
 def summarize_run(run: dict) -> dict:
-    """Recompute a summary only when the stored one predates avg_match_pct."""
-    stored_summary = run.get("summary")
-    if stored_summary and all(
-        key in stored_summary
-        for key in (
-            "n_results",
-            "avg_match_pct",
-            "n_strong",
-            "n_weak",
-            "avg_engagement_pct",
-            "median_followers",
-        )
-    ):
-        return stored_summary
-    candidates = {item["id"]: item for item in run["result"]["candidates"]}
-    ranked = [candidates[item["id"]] for item in run["result"]["ranked"] if item["id"] in candidates]
-    similarities = [item.get("similarity") for item in ranked]
-    similarities = [value for value in similarities if value is not None]
-    return {
-        "n_results": len(ranked),
-        "avg_match_pct": round(100 * (sum(similarities) / len(similarities)), 1) if similarities else 0.0,
-        "n_strong": sum(item.get("fit") == "strong" for item in run["result"]["ranked"]),
-        "n_weak": sum(item.get("fit") == "weak" for item in run["result"]["ranked"]),
-        "avg_engagement_pct": (
-            sum(float(item["engagement_pct"]) for item in ranked) / len(ranked)
-            if ranked
-            else 0.0
-        ),
-        "median_followers": int(round(median(int(item["followers"]) for item in ranked))) if ranked else 0,
-    }
+    """Reuse the stored summary when it is complete, else recompute it.
+
+    The arithmetic lives in `serialization.build_summary`; this only decides
+    whether it has to run. It used to carry its own copy, reading the persisted
+    dicts while the original read `Influencer` objects -- two implementations
+    of one number, free to disagree.
+    """
+    stored = run.get("summary")
+    if stored and all(key in stored for key in SUMMARY_KEYS):
+        return stored
+    result = run["result"]
+    return build_summary(result["candidates"], result["ranked"])
 
 
 def compare_runs(run_a: dict, run_b: dict) -> dict:
-    candidates_a = {_creator_key(item): item for item in run_a["result"]["candidates"]}
-    candidates_b = {_creator_key(item): item for item in run_b["result"]["candidates"]}
+    candidates_a = {candidate_key(item): item for item in run_a["result"]["candidates"]}
+    candidates_b = {candidate_key(item): item for item in run_b["result"]["candidates"]}
     ranked_a = {item["id"]: item for item in run_a["result"]["ranked"]}
     ranked_b = {item["id"]: item for item in run_b["result"]["ranked"]}
     keys_a = {_ranked_key(item, candidates_a) for item in ranked_a.values()}
@@ -48,7 +30,7 @@ def compare_runs(run_a: dict, run_b: dict) -> dict:
         candidate = candidates_a[key]
         shared.append({
             "id": candidate["id"],
-            "creator_key": _creator_key(candidate),
+            "creator_key": candidate_key(candidate),
             "handle": candidate["handle"],
         })
     return {
@@ -59,15 +41,8 @@ def compare_runs(run_a: dict, run_b: dict) -> dict:
     }
 
 
-def _creator_key(item: dict) -> str:
-    key = item.get("creator_key")
-    if key and ":" in key:
-        return key
-    return f"{item.get('platform', '')}:{item['handle']}"
-
-
 def _ranked_key(entry: dict, candidates: dict[str, dict]) -> str:
     candidate = candidates.get(next((key for key, item in candidates.items() if item["id"] == entry["id"]), ""))
     if candidate is None:
         return str(entry.get("creator_key") or entry["id"])
-    return _creator_key(candidate)
+    return candidate_key(candidate)

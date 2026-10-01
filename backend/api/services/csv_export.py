@@ -3,41 +3,50 @@ from __future__ import annotations
 import csv
 import io
 
-CSV_COLUMNS = [
-    "rank",
-    "creator_key",
-    "handle",
-    "name",
-    "platform",
-    "city",
-    "country",
-    "followers",
-    "engagement_pct",
-    "average_views",
-    "average_likes",
-    "average_comments",
-    "verified",
-    "posts_per_week",
-    "account_age_years",
-    "content_style",
-    "language",
-    "audience_age",
-    "audience_gender",
-    "audience_country",
-    "semantic_similarity",
-    "reach_ratio",
-    "sponsored_ratio",
-    "growth_trend",
-    "audience_top_countries",
-    "fit",
-    "source",
-    "rationale",
-    "evidence",
-    "grounding",
-    "fallback_reason",
-    "tags",
-    "brand_collaborations",
-]
+#: Column -> how to read it off (creator, ranked entry, rank).
+#:
+#: This replaces a 33-name CSV_COLUMNS list beside a 33-value writerow, which
+#: `csv.writer` matches by position. Add a column to one and forget the other
+#: and every later value silently shifts a column right.
+_CELL = {
+    "rank": lambda c, e, r: r,
+    "creator_key": lambda c, e, r: c.get("creator_key") or c.get("handle", ""),
+    "handle": lambda c, e, r: c.get("handle", ""),
+    "name": lambda c, e, r: c.get("name", ""),
+    "platform": lambda c, e, r: c.get("platform", ""),
+    "city": lambda c, e, r: c.get("city", ""),
+    "country": lambda c, e, r: c.get("country", ""),
+    "followers": lambda c, e, r: c.get("followers", 0),
+    "engagement_pct": lambda c, e, r: c.get("engagement_pct", 0),
+    "average_views": lambda c, e, r: c.get("average_views", 0),
+    "average_likes": lambda c, e, r: c.get("average_likes", 0),
+    "average_comments": lambda c, e, r: c.get("average_comments", 0),
+    "verified": lambda c, e, r: c.get("verified", False),
+    "posts_per_week": lambda c, e, r: c.get("posts_per_week", 0),
+    "account_age_years": lambda c, e, r: c.get("account_age_years", 0),
+    "content_style": lambda c, e, r: c.get("content_style", ""),
+    "language": lambda c, e, r: c.get("language", ""),
+    "audience_age": lambda c, e, r: c.get("audience_age", ""),
+    "audience_gender": lambda c, e, r: c.get("audience_gender", ""),
+    "audience_country": lambda c, e, r: c.get("audience_country", ""),
+    "semantic_similarity": lambda c, e, r: c.get("similarity", ""),
+    "reach_ratio": lambda c, e, r: f"{c.get('reach_ratio', 0):.3f}",
+    "sponsored_ratio": lambda c, e, r: f"{c.get('sponsored_ratio', 0):.3f}",
+    "growth_trend": lambda c, e, r: c.get("growth_trend", ""),
+    "audience_top_countries": lambda c, e, r: "|".join(c.get("audience_top_countries", [])),
+    "fit": lambda c, e, r: e.get("fit", ""),
+    "source": lambda c, e, r: e.get("source", ""),
+    "rationale": lambda c, e, r: e.get("rationale", ""),
+    "evidence": lambda c, e, r: "; ".join(e.get("evidence", [])),
+    "grounding": lambda c, e, r: "; ".join(
+        f"{claim.get('field')}={claim.get('quote')}" for claim in e.get("grounding", [])
+    ),
+    "fallback_reason": lambda c, e, r: e.get("fallback_reason", ""),
+    "tags": lambda c, e, r: "|".join(c.get("tags", [])),
+    "brand_collaborations": lambda c, e, r: "|".join(c.get("brand_collaborations", [])),
+}
+
+CSV_COLUMNS = list(_CELL)
 
 
 def build_csv(run: dict) -> str:
@@ -46,43 +55,14 @@ def build_csv(run: dict) -> str:
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(CSV_COLUMNS)
     for rank, entry in enumerate(run["result"]["ranked"], start=1):
-        creator = candidates[entry["id"]]
+        creator = candidates.get(entry.get("id"))
+        # A ranked entry whose snapshot is missing is skipped rather than
+        # raising. /runs/{id} already tolerates this by filtering, so the CSV
+        # export used to 500 where the JSON beside it returned 200.
+        if creator is None:
+            continue
         writer.writerow([
-            _safe_cell(rank),
-            _safe_cell(creator.get("creator_key", creator["handle"])),
-            _safe_cell(creator["handle"]),
-            _safe_cell(creator.get("name", "")),
-            _safe_cell(creator["platform"]),
-            _safe_cell(creator.get("city", "")),
-            _safe_cell(creator.get("country", "")),
-            _safe_cell(creator["followers"]),
-            _safe_cell(creator.get("engagement_pct", 0)),
-            _safe_cell(creator.get("average_views", 0)),
-            _safe_cell(creator.get("average_likes", 0)),
-            _safe_cell(creator.get("average_comments", 0)),
-            _safe_cell(creator.get("verified", False)),
-            _safe_cell(creator.get("posts_per_week", 0)),
-            _safe_cell(creator.get("account_age_years", 0)),
-            _safe_cell(creator.get("content_style", "")),
-            _safe_cell(creator.get("language", "")),
-            _safe_cell(creator.get("audience_age", "")),
-            _safe_cell(creator.get("audience_gender", "")),
-            _safe_cell(creator.get("audience_country", "")),
-            _safe_cell(creator.get("similarity", "")),
-            _safe_cell(f"{creator.get('reach_ratio', 0):.3f}"),
-            _safe_cell(f"{creator.get('sponsored_ratio', 0):.3f}"),
-            _safe_cell(creator.get("growth_trend", "")),
-            _safe_cell("|".join(creator.get("audience_top_countries", []))),
-            _safe_cell(entry.get("fit", "")),
-            _safe_cell(entry.get("source", "")),
-            _safe_cell(entry.get("rationale", "")),
-            _safe_cell("; ".join(entry.get("evidence", []))),
-            _safe_cell("; ".join(
-                f"{claim['field']}={claim['quote']}" for claim in entry.get("grounding", [])
-            )),
-            _safe_cell(entry.get("fallback_reason", "")),
-            _safe_cell("|".join(creator.get("tags", []))),
-            _safe_cell("|".join(creator.get("brand_collaborations", []))),
+            _safe_cell(read(creator, entry, rank)) for read in _CELL.values()
         ])
     return output.getvalue()
 

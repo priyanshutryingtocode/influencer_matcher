@@ -32,7 +32,7 @@ def brief_to_payload(brief: Brief) -> dict:
 def creator_to_snapshot(influencer: Influencer) -> dict:
     return CreatorSnapshot(
         id=influencer.id,
-        creator_key=_creator_key(influencer),
+        creator_key=creator_key(influencer),
         handle=influencer.handle,
         name=influencer.name,
         platform=influencer.platform,
@@ -70,7 +70,7 @@ def ranked_to_snapshot(
 ) -> dict:
     return RankedCreator(
         id=influencer.id,
-        creator_key=_creator_key(influencer),
+        creator_key=creator_key(influencer),
         rank=rank,
         fit=entry.get("fit", "unknown"),
         source=entry.get("source", "filled"),
@@ -118,21 +118,51 @@ def build_warnings(ranked: list[dict]) -> list[dict]:
     return [warning.model_dump(mode="json") for warning in warnings]
 
 
-def build_summary(candidates: list[Influencer], ranked: list[dict]) -> dict:
-    by_id = {candidate.id: candidate for candidate in candidates}
-    ranked_candidates = [by_id[item["id"]] for item in ranked if item.get("id") in by_id]
-    similarities = [item.similarity for item in ranked_candidates if item.similarity is not None]
+#: The six keys a stored summary must carry to be reused instead of recomputed.
+SUMMARY_KEYS = (
+    "n_results",
+    "avg_match_pct",
+    "n_strong",
+    "n_weak",
+    "avg_engagement_pct",
+    "median_followers",
+)
+
+
+def build_summary(candidates: list[dict], ranked: list[dict]) -> dict:
+    """The one place run statistics are computed.
+
+    Takes the persisted snapshot shape rather than `Influencer` objects, because
+    that is what a stored run actually holds -- `compare_service` has to
+    recompute from a DB record and was reimplementing this against dicts.
+
+    Every count is taken over the joined set. The previous version counted
+    `n_strong`/`n_weak` over the whole ranked list while `n_results` counted
+    only joined candidates, so a run with a dangling ranked entry could report
+    "4/5 strong fits".
+    """
+    by_id = {candidate["id"]: candidate for candidate in candidates}
+    joined = [(entry, by_id[entry["id"]]) for entry in ranked if entry.get("id") in by_id]
+    similarities = [
+        float(creator["similarity"])
+        for _, creator in joined
+        if creator.get("similarity") is not None
+    ]
     return RunSummary(
-        n_results=len(ranked_candidates),
+        n_results=len(joined),
         avg_match_pct=round(100 * (sum(similarities) / len(similarities)), 1) if similarities else 0.0,
-        n_strong=sum(item.get("fit") == "strong" for item in ranked),
-        n_weak=sum(item.get("fit") == "weak" for item in ranked),
+        n_strong=sum(entry.get("fit") == "strong" for entry, _ in joined),
+        n_weak=sum(entry.get("fit") == "weak" for entry, _ in joined),
         avg_engagement_pct=(
-            sum(item.engagement for item in ranked_candidates) / len(ranked_candidates)
-            if ranked_candidates
+            sum(float(creator.get("engagement_pct") or 0.0) for _, creator in joined) / len(joined)
+            if joined
             else 0.0
         ),
-        median_followers=int(round(median(item.followers for item in ranked_candidates))) if ranked_candidates else 0,
+        median_followers=(
+            int(round(median(int(creator.get("followers") or 0) for _, creator in joined)))
+            if joined
+            else 0
+        ),
     ).model_dump(mode="json")
 
 
@@ -163,7 +193,7 @@ def build_run_record(result: dict, run_id: UUID, indexed_count: int | None = Non
             "ranked": ranked_snapshots,
         },
         "warnings": build_warnings(ranked),
-        "summary": build_summary(candidates, ranked),
+        "summary": build_summary(candidate_snapshots, ranked),
     }
 
 
@@ -189,7 +219,7 @@ def _normalize_result(result: dict) -> dict:
     by_id = {}
     for raw in result.get("candidates", []):
         candidate = dict(raw)
-        candidate["creator_key"] = _candidate_key(candidate)
+        candidate["creator_key"] = candidate_key(candidate)
         candidates.append(candidate)
         by_id[candidate["id"]] = candidate
     ranked = []
@@ -202,7 +232,7 @@ def _normalize_result(result: dict) -> dict:
     return {"candidates": candidates, "ranked": ranked}
 
 
-def _candidate_key(candidate: dict) -> str:
+def candidate_key(candidate: dict) -> str:
     key = candidate.get("creator_key")
     if key and ":" in key:
         return key
@@ -221,5 +251,5 @@ def run_list_item(record: dict) -> RunListItem:
     )
 
 
-def _creator_key(influencer: Influencer) -> str:
+def creator_key(influencer: Influencer) -> str:
     return f"{influencer.platform}:{influencer.handle}"

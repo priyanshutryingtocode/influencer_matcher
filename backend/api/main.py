@@ -34,6 +34,35 @@ from src.platforms import PLATFORMS
 logger = logging.getLogger(__name__)
 
 
+def _unavailable(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"code": code, "message": message},
+    )
+
+
+def _require_ready(request: Request) -> None:
+    """The single readiness gate, so the two callers cannot disagree.
+
+    These were two ladders over the same three conditions in a different order,
+    and they did disagree: /health/ready reported NOT_READY where
+    /match-jobs reported INDEX_NOT_READY for an empty index, so a client had to
+    know two codes for one state. The mismatch check was also missing from the
+    match path entirely, which is how a stale index reached ranking.
+    """
+    state = request.app.state
+    if not state.database_available:
+        raise _unavailable("DATABASE_UNAVAILABLE", "The creator database is unavailable.")
+    if state.index_model_mismatch:
+        raise _unavailable(
+            "INDEX_MODEL_MISMATCH",
+            f"The creator index was built with a different embedding model than "
+            f"{config.EMBED_MODEL}. It must be re-embedded before matching works.",
+        )
+    if not state.db_ready or state.indexed_count <= 0:
+        raise _unavailable("NOT_READY", "The creator index is not ready.")
+
+
 def create_app(
     repository=None,
     job_manager=None,
@@ -161,27 +190,7 @@ def create_app(
     @application.get("/health/ready")
     def ready(request: Request):
         _refresh_index_state(request)
-        if not request.app.state.database_available:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"code": "DATABASE_UNAVAILABLE", "message": "The creator database is unavailable."},
-            )
-        if request.app.state.index_model_mismatch:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "code": "INDEX_MODEL_MISMATCH",
-                    "message": (
-                        f"The creator index was built with a different embedding model than "
-                        f"{config.EMBED_MODEL}. It must be re-embedded before matching works."
-                    ),
-                },
-            )
-        if not request.app.state.db_ready or request.app.state.indexed_count <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"code": "NOT_READY", "message": "The creator index is not ready."},
-            )
+        _require_ready(request)
         return {
             "status": "ready",
             "database": True,
@@ -213,8 +222,8 @@ def create_app(
                 "top_k_max": config.MAX_TOP_K,
                 "top_n_min": 1,
                 "top_n_max": config.MAX_TOP_K,
-                "audience_max_length": 300,
-                "vibe_max_length": 500,
+                "audience_max_length": config.AUDIENCE_MAX_LENGTH,
+                "vibe_max_length": config.VIBE_MAX_LENGTH,
                 "goal_min_length": config.MIN_GOAL_LENGTH,
                 "goal_max_length": config.MAX_GOAL_LENGTH,
             },
@@ -248,16 +257,7 @@ def create_app(
                 detail={"code": "AUTH_REQUIRED", "message": "Sign in before running a match."},
             )
         _refresh_index_state(request)
-        if not request.app.state.database_available:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"code": "DATABASE_UNAVAILABLE", "message": "The creator database is unavailable."},
-            )
-        if not request.app.state.db_ready:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"code": "INDEX_NOT_READY", "message": "Index the creators before matching."},
-            )
+        _require_ready(request)
         manager = request.app.state.job_manager
         if manager is None:
             raise HTTPException(
@@ -274,8 +274,6 @@ def create_app(
                 ) from exc
         try:
             brief = payload.brief.to_domain()
-            if owner_id is None:
-                return manager.submit(brief, payload.params)
             return manager.submit(brief, payload.params, owner_id=owner_id)
         except JobQueueFullError as exc:
             raise HTTPException(
@@ -287,10 +285,7 @@ def create_app(
     def get_match_job(job_id: UUID, request: Request):
         owner_id = current_user_id(request)
         manager = request.app.state.job_manager
-        if owner_id is None:
-            job = manager.get(job_id) if manager else None
-        else:
-            job = manager.get(job_id, owner_id=owner_id) if manager else None
+        job = manager.get(job_id, owner_id=owner_id) if manager else None
         if job is None:
             raise _not_found("MATCH_JOB_NOT_FOUND", "Match job not found.")
         return job
@@ -304,10 +299,7 @@ def create_app(
         owner_id = current_user_id(request)
         try:
             repository = _repository(request)
-            if owner_id is None:
-                records, next_cursor = repository.list(limit=limit, cursor=cursor)
-            else:
-                records, next_cursor = repository.list(limit=limit, cursor=cursor, owner_id=owner_id)
+            records, next_cursor = repository.list(limit=limit, cursor=cursor, owner_id=owner_id)
         except InvalidCursor as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -322,7 +314,7 @@ def create_app(
     def export_run(run_id: UUID, request: Request):
         owner_id = current_user_id(request)
         repository = _repository(request)
-        record = repository.get(run_id) if owner_id is None else repository.get(run_id, owner_id=owner_id)
+        record = repository.get(run_id, owner_id=owner_id)
         if record is None:
             raise _not_found("RUN_NOT_FOUND", "Run not found.")
         return Response(
@@ -335,7 +327,7 @@ def create_app(
     def get_run(run_id: UUID, request: Request):
         owner_id = current_user_id(request)
         repository = _repository(request)
-        record = repository.get(run_id) if owner_id is None else repository.get(run_id, owner_id=owner_id)
+        record = repository.get(run_id, owner_id=owner_id)
         if record is None:
             raise _not_found("RUN_NOT_FOUND", "Run not found.")
         return run_detail(record)
@@ -344,7 +336,7 @@ def create_app(
     def delete_run(run_id: UUID, request: Request):
         owner_id = current_user_id(request)
         repository = _repository(request)
-        deleted = repository.delete(run_id) if owner_id is None else repository.delete(run_id, owner_id=owner_id)
+        deleted = repository.delete(run_id, owner_id=owner_id)
         if not deleted:
             raise _not_found("RUN_NOT_FOUND", "Run not found.")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -353,8 +345,8 @@ def create_app(
     def compare(payload: ComparisonRequest, request: Request):
         owner_id = current_user_id(request)
         repository = _repository(request)
-        run_a = repository.get(payload.run_id_a) if owner_id is None else repository.get(payload.run_id_a, owner_id=owner_id)
-        run_b = repository.get(payload.run_id_b) if owner_id is None else repository.get(payload.run_id_b, owner_id=owner_id)
+        run_a = repository.get(payload.run_id_a, owner_id=owner_id)
+        run_b = repository.get(payload.run_id_b, owner_id=owner_id)
         if run_a is None or run_b is None:
             raise _not_found("RUN_NOT_FOUND", "One or both runs were not found.")
         return compare_runs(run_a, run_b)

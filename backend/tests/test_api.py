@@ -245,7 +245,7 @@ def test_api_rejects_thin_goal_and_reports_index_not_ready():
             json={"brief": {"goal": "a thrifted-vintage clothing label for Gen Z", "platform": "Any"}},
         )
         assert ready_response.status_code == 503
-        assert ready_response.json()["detail"]["code"] == "INDEX_NOT_READY"
+        assert ready_response.json()["detail"]["code"] == "NOT_READY"
 
 
 def test_demo_ip_rate_limit_blocks_repeated_matches(monkeypatch):
