@@ -81,12 +81,13 @@ export function ResultCard({ creator, entry, brief, highlight = false }: ResultC
           {/* title is a mouse affordance only; aria-label is what a screen
            * reader announces, and it has to name the metric rather than leave
            * a bare percentage next to a fit verdict. */}
-          <span
-            className="fit-match"
-            title={SIMILARITY_EXPLANATION}
-            aria-label={`Cosine similarity to your brief: ${similarity}`}
-          >
-            {similarity}
+          <span className="fit-match" title={SIMILARITY_EXPLANATION}>
+            {/* aria-label on a <span> with no role is not exposed -- the name is
+              dropped, so this read as a bare percentage again. The visible
+              number is hidden from AT and the full phrase carries it instead,
+              which also avoids announcing the same value twice. */}
+            <span aria-hidden="true">{similarity}</span>
+            <span className="visually-hidden">{`Cosine similarity to your brief: ${similarity}`}</span>
           </span>
         </span>
         {entry.source !== "llm" && <span className="source-label">{fallbackSourceLabels[entry.source]}</span>}

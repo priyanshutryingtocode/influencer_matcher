@@ -54,7 +54,22 @@ describe("AccountMenu", () => {
     expect(screen.queryByRole("menuitem")).toBeNull();
   });
 
-  it("moves focus into the popover on open and back to the trigger on close", () => {
+    /* The focus effect also runs on mount. Unguarded, it pulled focus to the
+     * account button every time the page loaded -- which fought the skip
+     * link, the one control whose whole job is to move focus deliberately. */
+    it("does not steal focus on mount", () => {
+      const outside = document.createElement("input");
+      document.body.appendChild(outside);
+      outside.focus();
+      expect(document.activeElement).toBe(outside);
+
+      render(<AccountMenu user={makeUser()} signOut={vi.fn()} />);
+
+      expect(document.activeElement).toBe(outside);
+      document.body.removeChild(outside);
+    });
+
+    it("moves focus into the popover on open and back to the trigger on close", () => {
     const { trigger } = openMenu();
 
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sign out" }));

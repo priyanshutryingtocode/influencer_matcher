@@ -42,16 +42,26 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
     };
   }, [open]);
 
+  const wasOpenRef = useRef(false);
   useEffect(() => {
     if (open) {
       // Opening a popover without moving focus into it leaves a keyboard user
-      // tabbing blind through the page behind it.
-      signOutRef.current?.focus();
+      // tabbing blind through the page behind it. preventScroll because the
+      // panel is anchored under the trigger: without it, opening the menu
+      // scrolled the page to bring the button into view.
+      wasOpenRef.current = true;
+      signOutRef.current?.focus({ preventScroll: true });
       return;
     }
     // Closing returns focus to the trigger, so the user is not dropped at the
-    // top of the document.
-    triggerRef.current?.focus();
+    // top of the document. Guarded on having been open: this effect also runs
+    // on mount, and the unguarded version stole focus to the account button
+    // every time the page loaded -- including straight after the skip link,
+    // which is the one place focus must not be moved from.
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      triggerRef.current?.focus();
+    }
   }, [open]);
 
   async function handleSignOut() {
@@ -84,7 +94,7 @@ export function AccountMenu({ user, signOut }: AccountMenuProps) {
            its contents did not follow -- an identity header, a rule, and a live
            error region are not menu items -- and with one action it bought
            nothing over aria-expanded. */
-        <div className="account-menu" id="account-popover" aria-label="Account">
+        <div className="account-menu" id="account-popover" role="group" aria-label="Account">
           <div className="account-menu-header">
             <span className="account-avatar account-avatar-large" aria-hidden="true">{identity.initials}</span>
             <div className="account-menu-identity">

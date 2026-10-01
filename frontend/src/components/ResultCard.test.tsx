@@ -204,6 +204,8 @@ describe("ResultCard", () => {
   it("names the similarity metric for assistive tech, not just a bare percent", () => {
     render(<ResultCard creator={creator} entry={entry} brief={brief} />);
 
-    expect(screen.getByLabelText("Cosine similarity to your brief: 91.0%")).toBeTruthy();
+      expect(screen.getByText("Cosine similarity to your brief: 91.0%")).toBeTruthy();
+      // The visible number is hidden from AT, so the value is not read twice.
+      expect(screen.getByText("91.0%").getAttribute("aria-hidden")).toBe("true");
   });
 });

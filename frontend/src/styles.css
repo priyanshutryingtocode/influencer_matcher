@@ -144,7 +144,7 @@ select { cursor: pointer; }
 input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { border-color: var(--signal); outline: 2px solid var(--signal-focus); outline-offset: 2px; }
 /* <main> takes programmatic focus on every route change. It has no border, so
    the generic rule above would draw a ring around the entire page. */
-.main-content:focus, .main-content:focus-visible { outline: none; }
+.page-content:focus, .page-content:focus-visible { outline: none; }
 .rail-divider { height: 1px; background: var(--rule); }
 .retrieval-controls { display: grid; gap: 1rem; }
 .control-heading { color: var(--muted-strong); font-size: var(--text-xs); font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }

@@ -342,7 +342,10 @@ function RunStatus({ job, isRunning }: { job: MatchJob; isRunning: boolean }) {
       <div className="run-status-heading">
         <div>
           <p className="eyebrow">{job.status === "succeeded" ? "Completed run" : isTerminal ? "Run status" : "Live run"}</p>
-          <h2 aria-live="polite" aria-busy={!isTerminal}>{stageLabel(job.stage)}</h2>
+          {/* No aria-busy here. On a live region it tells AT to hold back the
+            * update, which is the opposite of the intent: the stage label is
+            * the one line that should be announced as it changes. */}
+          <h2 aria-live="polite">{stageLabel(job.stage)}</h2>
         </div>
         <span className="status-text">{isRunning ? "In progress" : job.status === "succeeded" ? "Complete" : job.status}</span>
       </div>
