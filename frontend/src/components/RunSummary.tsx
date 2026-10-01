@@ -1,3 +1,5 @@
+import { useId, useState } from "react";
+
 import type { RunSummary } from "../types";
 
 export const SIMILARITY_EXPLANATION =
@@ -6,29 +8,68 @@ export const SIMILARITY_EXPLANATION =
   + "comparing one brief against another, but it does not reliably rank creators "
   + "within a single shortlist. Use the strong-fit count for that.";
 
+interface MetricCell {
+  label: string;
+  value: string;
+  caption: string;
+  /** The cell's value is the headline; rendered in the signal colour. */
+  primary?: boolean;
+  /** A caveat worth reaching on demand. The similarity number is the one
+   *  metric here that can be misread as a fit score, so it carries the
+   *  explanation rather than leaving it to a hover-only tooltip. */
+  explanation?: string;
+}
+
+function metricCells(summary: RunSummary): MetricCell[] {
+  return [
+    { label: "Quality", value: `${summary.n_strong}/${summary.n_results}`, caption: "strong fits", primary: true },
+    { label: "Avg similarity", value: `${summary.avg_match_pct.toFixed(1)}%`, caption: "cosine vs. brief", explanation: SIMILARITY_EXPLANATION },
+    { label: "Avg engagement", value: `${summary.avg_engagement_pct.toFixed(1)}%`, caption: "reach quality" },
+    { label: "Median reach", value: formatFollowers(summary.median_followers), caption: "followers" },
+    { label: "Needs review", value: String(summary.n_weak), caption: "weak fits" },
+  ];
+}
+
 export function SummaryMetrics({ summary, compact = false }: { summary: RunSummary; compact?: boolean }) {
+  const [explained, setExplained] = useState(false);
+  const explanationId = useId();
+
   return (
     <dl className={`summary-strip ${compact ? "summary-strip-compact" : ""}`}>
-      <div className="summary-item summary-item-primary">
-        <dt>Quality</dt>
-        <dd><strong>{summary.n_strong}/{summary.n_results}</strong><span>strong fits</span></dd>
-      </div>
-      <div className="summary-item">
-        <dt title={SIMILARITY_EXPLANATION}>Avg similarity</dt>
-        <dd title={SIMILARITY_EXPLANATION}><strong>{summary.avg_match_pct.toFixed(1)}%</strong><span>cosine vs. brief</span></dd>
-      </div>
-      <div className="summary-item">
-        <dt>Avg engagement</dt>
-        <dd><strong>{summary.avg_engagement_pct.toFixed(1)}%</strong><span>reach quality</span></dd>
-      </div>
-      <div className="summary-item">
-        <dt>Median reach</dt>
-        <dd><strong>{formatFollowers(summary.median_followers)}</strong><span>followers</span></dd>
-      </div>
-      <div className="summary-item">
-        <dt>Needs review</dt>
-        <dd><strong>{summary.n_weak}</strong><span>weak fits</span></dd>
-      </div>
+      {metricCells(summary).map((cell) => {
+        const body = (
+          <>
+            <strong>{cell.value}</strong>
+            <span>{cell.caption}</span>
+            {cell.explanation && explained && (
+              <span className="summary-explain-body" id={explanationId}>{cell.explanation}</span>
+            )}
+          </>
+        );
+        return (
+          <div className={`summary-item ${cell.primary ? "summary-item-primary" : ""}`} key={cell.label}>
+            {cell.explanation
+              ? (
+                /* A disclosure, not a title= attribute: a <dt> is not focusable,
+                 * so the caveat used to be reachable by mouse only. */
+                <dt>
+                  <button
+                    className="summary-explain-toggle"
+                    type="button"
+                    aria-expanded={explained}
+                    aria-controls={explained ? explanationId : undefined}
+                    onClick={() => setExplained((open) => !open)}
+                  >
+                    {cell.label}
+                    <span className="summary-explain-icon" aria-hidden="true">?</span>
+                  </button>
+                </dt>
+              )
+              : <dt>{cell.label}</dt>}
+            <dd>{body}</dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api, ApiError } from "../api/client";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorNote } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
@@ -79,7 +80,7 @@ export function HistoryPage() {
           {/* aria-busy/live: this replaced the detail pane with a heading, so a
            * sighted user saw progress while a screen-reader user heard nothing
            * and focus stayed on the ledger button they had just pressed. */}
-          {isOpening && <div className="empty-state" aria-live="polite" aria-busy="true"><h2>Opening shortlist</h2></div>}
+          {isOpening && <EmptyState title="Opening shortlist" busy />}
           {!isOpening && selected && (
             <>
               <RunContext
@@ -93,7 +94,13 @@ export function HistoryPage() {
               <ResultList run={selected} />
             </>
           )}
-          {!isOpening && !selected && <div className="empty-state"><span className="empty-index">SELECT</span><h2>Choose a saved run</h2><p>Open a shortlist to inspect its ranked creators and export the result.</p></div>}
+          {!isOpening && !selected && (
+            <EmptyState
+              index="SELECT"
+              title="Choose a saved run"
+              body="Open a shortlist to inspect its ranked creators and export the result."
+            />
+          )}
         </div>
       </div>
     </section>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { api, ApiError } from "../api/client";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorNote } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
@@ -268,7 +269,13 @@ export function SearchPage() {
               * hook clearing `job` on failure. The `!job` clause covers a job
               * restored without a local submit. */}
             {!hasStarted && !job && !run && <EmptyWorkspace />}
-            {job?.outcome === "no_results" && <div className="empty-state"><span className="empty-index">NO MATCH</span><h2>Try a wider platform.</h2><p>No creators came back for this filter. Switch to Any or adjust the brief.</p></div>}
+            {job?.outcome === "no_results" && (
+              <EmptyState
+                index="NO MATCH"
+                title="Try a wider platform."
+                body="No creators came back for this filter. Switch to Any or adjust the brief."
+              />
+            )}
             {awaitingRun && <LoadingResults />}
             {run && (
               <div className="run-results">
@@ -406,12 +413,12 @@ function stepState(
 
 function EmptyWorkspace() {
   return (
-    <div className="empty-state">
-      <span className="empty-index">READY</span>
-      <h2>Set a brief.</h2>
-      <p>Retrieval, semantic matching, and ranking stay visible here while the run moves through each stage.</p>
-      <div className="empty-steps">{pipelineStages.map((stage) => <span key={stage.key}>{stage.label}</span>)}</div>
-    </div>
+    <EmptyState
+      index="READY"
+      title="Set a brief."
+      body="Retrieval, semantic matching, and ranking stay visible here while the run moves through each stage."
+      steps={pipelineStages.map((stage) => stage.label)}
+    />
   );
 }
 

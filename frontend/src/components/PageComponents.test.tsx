@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ErrorNote, InfoNote } from "./SystemNote";
+import { EmptyState } from "./EmptyState";
 import { PageIntro } from "./PageIntro";
 import { ResultList } from "./ResultList";
+import { ErrorNote, InfoNote } from "./SystemNote";
 import { RunContext } from "./RunContext";
 import type { Brief, CreatorSnapshot, RankedCreator } from "../types";
 
@@ -212,6 +213,38 @@ describe("ResultList", () => {
     );
 
     expect(screen.getByText(/creator details are no longer available/i)).toBeTruthy();
+  });
+
+  /* The four empty states were open-coded with drifting structure. One now
+   * renders all of them, and this pins the optional parts actually staying
+   * optional -- a missing index or body must not leave a blank tag behind. */
+  it("omits the index and body when they are not given", () => {
+    const { container } = render(<EmptyState title="Opening shortlist" busy />);
+
+    expect(screen.getByRole("heading", { name: "Opening shortlist" })).toBeTruthy();
+    expect(container.querySelector(".empty-index")).toBeNull();
+    expect(container.querySelector(".empty-steps")).toBeNull();
+  });
+
+  it("renders the index, body and steps it is given, and marks a busy state", () => {
+    const { container } = render(
+      <EmptyState index="READY" title="Set a brief." body="Retrieval stays visible." steps={["Prepare", "Rank"]} />,
+    );
+
+    expect(container.querySelector(".empty-index")?.textContent).toBe("READY");
+    expect(screen.getByText("Retrieval stays visible.")).toBeTruthy();
+    expect(container.querySelectorAll(".empty-steps span")).toHaveLength(2);
+    expect(container.querySelector(".empty-state")?.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("announces a busy state without over-announcing a settled one", () => {
+    const { container, unmount } = render(<EmptyState title="Opening" busy />);
+    expect(container.querySelector(".empty-state")?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector(".empty-state")?.getAttribute("aria-live")).toBe("polite");
+    unmount();
+
+    const settled = render(<EmptyState index="SELECT" title="Choose a saved run" />);
+    expect(settled.container.querySelector(".empty-state")?.getAttribute("aria-busy")).toBeNull();
   });
 
   it("highlights only the creators named by the key set", () => {

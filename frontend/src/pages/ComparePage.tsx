@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api, ApiError } from "../api/client";
+import { EmptyState } from "../components/EmptyState";
 import { ErrorNote, InfoNote } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
@@ -85,7 +86,17 @@ export function ComparePage() {
       </section>
     );
   }
-  if (runs.length < 2) return <div className="empty-state page-section"><span className="empty-index">COMPARE</span><h1>Two runs make a comparison.</h1><p>Save at least two shortlists to see overlap, quality changes, and rank movement.</p></div>;
+  if (runs.length < 2) {
+    return (
+      <div className="page-section">
+        <EmptyState
+          index="COMPARE"
+          title="Two runs make a comparison."
+          body="Save at least two shortlists to see overlap, quality changes, and rank movement."
+        />
+      </div>
+    );
+  }
 
   return (
     <section className="page-section">
