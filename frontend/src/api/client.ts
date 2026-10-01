@@ -18,6 +18,14 @@ const backendWakeTimeoutMs = 120_000;
  *  misconfiguration rather than a cold start. */
 export const localWakeTimeoutMs = 10_000;
 
+/** A free-tier instance sleeps after 15 minutes idle and needs roughly a minute
+ *  to come back, so an unbounded fetch leaves the user on a spinner with
+ *  nothing to retry. Every request carries a ceiling and turns a hang into a
+ *  message that names the likely cause. */
+const defaultRequestTimeoutMs = 30_000;
+/** Run detail and CSV export are the two reads that can outrun the default. */
+const slowRequestTimeoutMs = 90_000;
+
 function wakeTimeoutMs(): number {
   return import.meta.env.DEV ? localWakeTimeoutMs : backendWakeTimeoutMs;
 }
@@ -49,12 +57,52 @@ async function authenticatedHeaders(init?: RequestInit) {
   return headers;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+interface RequestOptions {
+  /** Abort after this long. Defaults to a fixed ceiling per endpoint. */
+  timeoutMs?: number;
+  /** Caller-owned cancellation, e.g. when a component unmounts. */
+  signal?: AbortSignal;
+}
+
+function timeoutMessage(timeoutMs: number): string {
+  return `The backend at ${apiTargetLabel()} did not respond within ${Math.round(timeoutMs / 1000)}s. `
+    + "It may have gone to sleep -- the status pill in the top bar wakes it.";
+}
+
+async function request<T>(path: string, init?: RequestInit, options: RequestOptions = {}): Promise<T> {
   if (import.meta.env.PROD && !isApiConfigured) {
     throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
   }
   const headers = await authenticatedHeaders(init);
-  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+  const timeoutMs = options.timeoutMs ?? defaultRequestTimeoutMs;
+  const controller = new AbortController();
+  const onCallerAbort = () => controller.abort();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Checked before subscribing: awaiting the auth headers above is async, so a
+  // caller can have aborted during it, and subscribing to an already-aborted
+  // signal never fires -- the request would then run to the full timeout.
+  if (options.signal?.aborted) {
+    clearTimeout(timer);
+    throw new DOMException("Aborted", "AbortError");
+  }
+  options.signal?.addEventListener("abort", onCallerAbort);
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      // A caller-cancelled request is not a failure to report; let it through so
+      // the caller's own staleness check discards it.
+      if (options.signal?.aborted) throw error;
+      throw new ApiError(timeoutMessage(timeoutMs), 408, null);
+    }
+    throw new ApiError(`The backend at ${apiTargetLabel()} could not be reached. Is it running?`, 0, null);
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onCallerAbort);
+  }
+
   const text = await response.text();
   let payload: unknown = null;
   if (text) {
@@ -99,7 +147,22 @@ async function downloadFile(path: string, filename: string) {
   if (import.meta.env.PROD && !isApiConfigured) {
     throw new Error("VITE_API_BASE_URL is not configured for this deployment.");
   }
-  const response = await fetch(`${baseUrl}${path}`, { headers: await authenticatedHeaders() });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), slowRequestTimeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      headers: await authenticatedHeaders(),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(timeoutMessage(slowRequestTimeoutMs), 408, null);
+    }
+    throw new ApiError(`The backend at ${apiTargetLabel()} could not be reached. Is it running?`, 0, null);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) {
     const text = await response.text();
     let payload: unknown = text;
@@ -122,18 +185,20 @@ async function downloadFile(path: string, filename: string) {
 export const api = {
   probeBackend: () => probeBackend(),
   getMeta: () => request<Meta>("/api/v1/meta"),
-  createMatchJob: (brief: Brief, params: MatchParams) =>
+  createMatchJob: (brief: Brief, params: MatchParams, options?: RequestOptions) =>
     request<MatchJob>("/api/v1/match-jobs", {
       method: "POST",
       body: JSON.stringify({ brief, params }),
-    }),
-  getMatchJob: (jobId: string) => request<MatchJob>(`/api/v1/match-jobs/${jobId}`),
+    }, options),
+  getMatchJob: (jobId: string, options?: RequestOptions) =>
+    request<MatchJob>(`/api/v1/match-jobs/${jobId}`, undefined, options),
   listRuns: (cursor?: string) => {
     const query = new URLSearchParams({ limit: "100" });
     if (cursor) query.set("cursor", cursor);
     return request<RunListResponse>(`/api/v1/runs?${query.toString()}`);
   },
-  getRun: (runId: string) => request<RunDetail>(`/api/v1/runs/${runId}`),
+  getRun: (runId: string, options?: RequestOptions) =>
+    request<RunDetail>(`/api/v1/runs/${runId}`, undefined, { timeoutMs: slowRequestTimeoutMs, ...options }),
   deleteRun: (runId: string) => request<void>(`/api/v1/runs/${runId}`, { method: "DELETE" }),
   compareRuns: (runIdA: string, runIdB: string) =>
     request<Comparison>("/api/v1/comparisons", {

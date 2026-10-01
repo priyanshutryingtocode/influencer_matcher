@@ -1,4 +1,4 @@
-import type { Brief, CreatorSnapshot, RankedCreator } from "../types";
+import type { Brief, CreatorSnapshot, FitLevel, RankedCreator, RankingSource } from "../types";
 import { SIMILARITY_EXPLANATION, formatFollowers } from "./RunSummary";
 
 interface ResultCardProps {
@@ -8,7 +8,9 @@ interface ResultCardProps {
   highlight?: boolean;
 }
 
-const fitLabels = {
+/* Keyed by the union, so a new fit level from the API fails to compile until it
+ * is given a label -- rather than rendering `undefined` into the row. */
+const fitLabels: Record<FitLevel, string> = {
   strong: "Strong",
   partial: "Partial",
   weak: "Weak",
@@ -19,11 +21,22 @@ const fitLabels = {
  *  so; labelling every row just adds noise. `llm_unverified` is called out
  *  because the model gave a reason and the server could not confirm any part
  *  of it, which a reader needs to know. */
-const fallbackSourceLabels = {
+const fallbackSourceLabels: Record<Exclude<RankingSource, "llm">, string> = {
   filled: "Filled from retrieval",
   fallback: "Retrieval fallback",
   llm_unverified: "Reason not confirmed",
 };
+
+/** Must match `QUOTA_REASON_TAG` in backend/src/ranking.py. A spent daily quota
+ *  needs different advice from an outage, so the server tags it and the reason
+ *  is persisted on the run; the tag is a code, not something to show a reader. */
+const DAILY_QUOTA_TAG = "daily_quota";
+
+function displayReason(reason: string): string {
+  return reason.startsWith(`${DAILY_QUOTA_TAG}:`)
+    ? reason.slice(DAILY_QUOTA_TAG.length + 1).trim()
+    : reason;
+}
 
 /** Field keys the API can ground a claim in, shown as readable labels. */
 const groundingLabels: Record<string, string> = {
@@ -40,7 +53,13 @@ const groundingLabels: Record<string, string> = {
 };
 
 export function ResultCard({ creator, entry, brief, highlight = false }: ResultCardProps) {
-  const subtitle = [creator.city, creator.content_style].filter(Boolean).join(" · ");
+  // Platform is a hard filter on the run, so naming it on every row of a
+  // filtered shortlist is noise. On an "Any" brief it is the one thing telling
+  // you which platform a creator is actually on, so it is shown only there.
+  const showPlatform = brief.platform === "Any";
+  const subtitle = [showPlatform ? creator.platform : "", creator.city, creator.content_style]
+    .filter(Boolean)
+    .join(" · ");
   const similarity = creator.similarity === null ? "—" : `${(creator.similarity * 100).toFixed(1)}%`;
 
   return (
@@ -59,9 +78,24 @@ export function ResultCard({ creator, entry, brief, highlight = false }: ResultC
         <span className="result-fit-line">
           <span className={`fit-mark fit-mark-${entry.fit}`} aria-hidden="true" />
           <span className="fit-label">{fitLabels[entry.fit]}</span>
-          <span className="fit-match" title={SIMILARITY_EXPLANATION}>{similarity}</span>
+          {/* title is a mouse affordance only; aria-label is what a screen
+           * reader announces, and it has to name the metric rather than leave
+           * a bare percentage next to a fit verdict. */}
+          <span
+            className="fit-match"
+            title={SIMILARITY_EXPLANATION}
+            aria-label={`Cosine similarity to your brief: ${similarity}`}
+          >
+            {similarity}
+          </span>
         </span>
         {entry.source !== "llm" && <span className="source-label">{fallbackSourceLabels[entry.source]}</span>}
+        {/* The server persists why a row fell back -- a metered daily ranking
+         * cap needs different advice from a truncated response -- and that
+         * reason was reaching this component and being dropped. */}
+        {entry.fallback_reason && (
+          <span className="source-detail">{displayReason(entry.fallback_reason)}</span>
+        )}
       </div>
       <div className="result-metrics">
         <Metric label="Reach" value={formatFollowers(creator.followers)} />

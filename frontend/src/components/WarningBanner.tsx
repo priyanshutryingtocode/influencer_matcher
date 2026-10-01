@@ -1,6 +1,6 @@
 import type { Warning } from "../types";
 
-const severityLabel = {
+const severityLabel: Record<Warning["severity"], string> = {
   error: "Error",
   warning: "Warning",
   info: "Notice",
