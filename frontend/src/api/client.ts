@@ -69,7 +69,11 @@ function timeoutMessage(timeoutMs: number): string {
     + "It may have gone to sleep -- the status pill in the top bar wakes it.";
 }
 
-async function request<T>(path: string, init?: RequestInit, options: RequestOptions = {}): Promise<T> {
+async function fetchGuarded(
+  path: string,
+  init?: RequestInit,
+  options: RequestOptions = {},
+): Promise<Response> {
   const headers = await authenticatedHeaders(init);
   const timeoutMs = options.timeoutMs ?? defaultRequestTimeoutMs;
   const controller = new AbortController();
@@ -84,9 +88,8 @@ async function request<T>(path: string, init?: RequestInit, options: RequestOpti
   }
   options.signal?.addEventListener("abort", onCallerAbort);
 
-  let response: Response;
   try {
-    response = await fetch(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
+    return await fetch(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       // A caller-cancelled request is not a failure to report; let it through so
@@ -99,16 +102,22 @@ async function request<T>(path: string, init?: RequestInit, options: RequestOpti
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", onCallerAbort);
   }
+}
 
+/** JSON if the body parses, raw text if not, null when empty. */
+async function readPayload(response: Response): Promise<unknown> {
   const text = await response.text();
-  let payload: unknown = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
+}
+
+async function request<T>(path: string, init?: RequestInit, options: RequestOptions = {}): Promise<T> {
+  const response = await fetchGuarded(path, init, options);
+  const payload = await readPayload(response);
   if (!response.ok) {
     throw new ApiError(errorMessage(payload), response.status, payload);
   }
@@ -138,34 +147,14 @@ async function probeBackend(timeoutMs = wakeTimeoutMs()): Promise<void> {
 }
 
 async function downloadFile(path: string, filename: string) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), slowRequestTimeoutMs);
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl}${path}`, {
-      headers: await authenticatedHeaders(),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError(timeoutMessage(slowRequestTimeoutMs), 408, null);
-    }
-    throw new ApiError(`The backend at ${apiTargetLabel()} could not be reached. Is it running?`, 0, null);
-  } finally {
-    clearTimeout(timer);
-  }
+  const response = await fetchGuarded(path, undefined, { timeoutMs: slowRequestTimeoutMs });
   if (!response.ok) {
-    const text = await response.text();
-    let payload: unknown = text;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
+    const payload = await readPayload(response);
     throw new ApiError(errorMessage(payload), response.status, payload);
   }
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
+  // Only blob() here, never readPayload(): a CSV body should not be buffered
+  // as a string just to be re-read as a blob.
+  const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -175,7 +164,7 @@ async function downloadFile(path: string, filename: string) {
 
 export const api = {
   probeBackend: () => probeBackend(),
-  getMeta: () => request<Meta>("/api/v1/meta"),
+  getMeta: (options?: RequestOptions) => request<Meta>("/api/v1/meta", undefined, options),
   createMatchJob: (brief: Brief, params: MatchParams, options?: RequestOptions) =>
     request<MatchJob>("/api/v1/match-jobs", {
       method: "POST",
@@ -183,10 +172,10 @@ export const api = {
     }, options),
   getMatchJob: (jobId: string, options?: RequestOptions) =>
     request<MatchJob>(`/api/v1/match-jobs/${jobId}`, undefined, options),
-  listRuns: (cursor?: string) => {
+  listRuns: (cursor?: string, options?: RequestOptions) => {
     const query = new URLSearchParams({ limit: "100" });
     if (cursor) query.set("cursor", cursor);
-    return request<RunListResponse>(`/api/v1/runs?${query.toString()}`);
+    return request<RunListResponse>(`/api/v1/runs?${query.toString()}`, undefined, options);
   },
   getRun: (runId: string, options?: RequestOptions) =>
     request<RunDetail>(`/api/v1/runs/${runId}`, undefined, { timeoutMs: slowRequestTimeoutMs, ...options }),

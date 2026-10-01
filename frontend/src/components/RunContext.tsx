@@ -1,9 +1,11 @@
-import type { Brief } from "../types";
+import type { RunDetail } from "../types";
 import { formatDate } from "../format";
 
 interface RunContextProps {
-  brief: Brief;
-  createdAt: string;
+  /** The whole run. Every caller already had it in hand and passed two of its
+   *  fields across, so the pair could be mismatched -- a date from one run
+   *  above a goal from another. */
+  run: RunDetail;
   /** Distinct label per page, e.g. "Shortlist" or "Run detail". */
   label: string;
   /** A double-click used to fire two downloads before the first resolved. */
@@ -11,7 +13,8 @@ interface RunContextProps {
   onExport: () => void;
 }
 
-export function RunContext({ brief, createdAt, label, exporting = false, onExport }: RunContextProps) {
+export function RunContext({ run, label, exporting = false, onExport }: RunContextProps) {
+  const { brief, created_at: createdAt } = run;
   return (
     <div className="run-context">
       <div>

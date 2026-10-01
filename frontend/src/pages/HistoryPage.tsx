@@ -9,36 +9,53 @@ import { ResultList } from "../components/ResultList";
 import { RunContext } from "../components/RunContext";
 import { SummaryMetrics } from "../components/RunSummary";
 import { WarningBanner } from "../components/WarningBanner";
+import { useResource } from "../hooks/useResource";
 import { useRuns } from "../hooks/useRuns";
 import { formatDate } from "../format";
 import type { RunDetail } from "../types";
 
 export function HistoryPage() {
   const { items, isLoading, isLoadingMore, hasMore, error, loadMore, remove, refresh } = useRuns();
-  const [selected, setSelected] = useState<RunDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [isOpening, setIsOpening] = useState(false);
+  // Which run is open, not the run itself. Keying the fetch off an id means a
+  // second click supersedes the first -- the old `setSelected(await getRun(a))`
+  // had no such guard, so opening A then B quickly could land A's slower
+  // response on top of B.
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
+  const detail = useResource<RunDetail>(
+    (signal) => api.getRun(openRunId!, { signal }),
+    [openRunId],
+    { enabled: openRunId !== null, fallbackError: "Could not load the run." },
+  );
+  const selected = detail.data;
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  // Delete had no in-flight state, so a double-click sent two DELETEs and the
+  // second one raced the row out of the list it had already filtered.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  async function openRun(runId: string) {
-    setDetailError(null);
-    setIsOpening(true);
+  async function deleteRun(runId: string) {
+    if (deletingId) return;
+    if (!window.confirm("Delete this saved shortlist?")) return;
+    setDeletingId(runId);
     try {
-      setSelected(await api.getRun(runId));
-    } catch (caught) {
-      setDetailError(caught instanceof ApiError ? caught.message : "Could not load the run.");
+      // `remove` re-throws after recording the message in the shared error slot,
+      // so the failure is already on screen; this only has to not reject.
+      await remove(runId);
+      if (openRunId === runId) setOpenRunId(null);
+    } catch {
+      return;
     } finally {
-      setIsOpening(false);
+      setDeletingId(null);
     }
   }
 
-  async function deleteRun(runId: string) {
-    if (!window.confirm("Delete this saved shortlist?")) return;
-    try {
-      await remove(runId);
-      if (selected?.run_id === runId) setSelected(null);
-    } catch {
-      return;
-    }
+  function exportRun() {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(null);
+    void api.downloadRun(selected!.run_id)
+      .catch((caught) => setExportError(caught instanceof ApiError ? caught.message : "Could not export the run."))
+      .finally(() => setExporting(false));
   }
 
   return (
@@ -54,7 +71,8 @@ export function HistoryPage() {
         )}
       />
 
-      {(error || detailError) && <ErrorNote title="Archive issue">{error ?? detailError}</ErrorNote>}
+      {(error || detail.error) && <ErrorNote title="Archive issue">{error ?? detail.error}</ErrorNote>}
+      {exportError && <ErrorNote title="Export issue">{exportError}</ErrorNote>}
       {isLoading && <LoadingLedger />}
 
       <div className="history-layout">
@@ -64,12 +82,21 @@ export function HistoryPage() {
             {!isLoading && !items.length && <div className="empty-ledger"><p>No saved shortlists yet.</p><Link to="/search">Run a match <span aria-hidden="true">→</span></Link></div>}
             {items.map((item) => (
               <article className={`history-row ${selected?.run_id === item.run_id ? "history-row-active" : ""}`} key={item.run_id}>
-                <button className="history-open" type="button" aria-current={selected?.run_id === item.run_id ? "true" : undefined} onClick={() => void openRun(item.run_id)}>
+                <button className="history-open" type="button" aria-current={openRunId === item.run_id ? "true" : undefined} onClick={() => setOpenRunId(item.run_id)}>
                   <span className="history-date">{formatDate(item.created_at)}</span>
                   <strong className="history-goal">{item.brief.goal}</strong>
                   <span className="history-meta">{item.n_results} results <i /> {item.n_strong} strong {item.has_warnings && <b>Notes</b>}</span>
                 </button>
-                <button className="btn btn-ghost btn-danger-ghost delete-button" type="button" aria-label={`Delete run: ${item.brief.goal}`} onClick={() => void deleteRun(item.run_id)}>Delete</button>
+                <button
+                  className="btn btn-ghost btn-danger-ghost delete-button"
+                  type="button"
+                  disabled={deletingId === item.run_id}
+                  aria-busy={deletingId === item.run_id}
+                  aria-label={`Delete run: ${item.brief.goal}`}
+                  onClick={() => void deleteRun(item.run_id)}
+                >
+                  Delete
+                </button>
               </article>
             ))}
             {hasMore && <button className="btn btn-ghost full-width" type="button" disabled={isLoadingMore} onClick={() => void loadMore()}>{isLoadingMore ? "Loading..." : "Load older runs"}</button>}
@@ -80,21 +107,21 @@ export function HistoryPage() {
           {/* aria-busy/live: this replaced the detail pane with a heading, so a
            * sighted user saw progress while a screen-reader user heard nothing
            * and focus stayed on the ledger button they had just pressed. */}
-          {isOpening && <EmptyState title="Opening shortlist" busy />}
-          {!isOpening && selected && (
+          {detail.loading && <EmptyState title="Opening shortlist" busy />}
+          {!detail.loading && selected && (
             <>
               <RunContext
-                brief={selected.brief}
-                createdAt={selected.created_at}
+                run={selected}
                 label="Run detail"
-                onExport={() => void api.downloadRun(selected.run_id).catch((caught) => setDetailError(caught instanceof ApiError ? caught.message : "Could not export the run."))}
+                exporting={exporting}
+                onExport={exportRun}
               />
               <WarningBanner warnings={selected.warnings} />
               <SummaryMetrics summary={selected.summary} compact />
               <ResultList run={selected} />
             </>
           )}
-          {!isOpening && !selected && (
+          {!detail.loading && !selected && (
             <EmptyState
               index="SELECT"
               title="Choose a saved run"

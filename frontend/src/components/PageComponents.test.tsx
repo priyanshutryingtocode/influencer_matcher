@@ -6,7 +6,7 @@ import { PageIntro } from "./PageIntro";
 import { ResultList } from "./ResultList";
 import { ErrorNote, InfoNote } from "./SystemNote";
 import { RunContext } from "./RunContext";
-import type { Brief, CreatorSnapshot, RankedCreator } from "../types";
+import type { Brief, CreatorSnapshot, RankedCreator, RunDetail } from "../types";
 
 afterEach(cleanup);
 
@@ -76,10 +76,16 @@ describe("ErrorNote", () => {
   });
 });
 
+const runFor = (brief: Brief, createdAt = "2026-09-27T10:00:00Z") =>
+  ({ run_id: "r1", brief, created_at: createdAt, candidates: [], ranked: [], summary: {
+    n_results: 0, avg_match_pct: 0, n_strong: 0, n_weak: 0,
+    avg_engagement_pct: 0, median_followers: 0,
+  }, warnings: [] }) as unknown as RunDetail;
+
 describe("RunContext", () => {
   it("summarises the brief and triggers the export", () => {
     const onExport = vi.fn();
-    render(<RunContext brief={brief} createdAt="2026-09-27T10:00:00Z" label="Shortlist" onExport={onExport} />);
+    render(<RunContext run={runFor(brief)} label="Shortlist" onExport={onExport} />);
 
     expect(screen.getByText(/^Shortlist \//)).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("high-energy strength training for beginners");
@@ -93,7 +99,7 @@ describe("RunContext", () => {
    * and the page held no in-flight state for it. */
   it("disables the export button while a download is in flight", () => {
     const onExport = vi.fn();
-    render(<RunContext brief={brief} createdAt="2026-09-27T10:00:00Z" label="Shortlist" exporting onExport={onExport} />);
+    render(<RunContext run={runFor(brief)} label="Shortlist" exporting onExport={onExport} />);
 
     const button = screen.getByRole("button", { name: "Exporting..." });
     expect((button as HTMLButtonElement).disabled).toBe(true);
@@ -136,8 +142,7 @@ describe("RunContext", () => {
   it("shows the free-text goal and omits empty optional refinements", () => {
     render(
       <RunContext
-        brief={{ goal: "at-home strength training for beginners", platform: "Any", audience: "", vibe: "" }}
-        createdAt="2026-09-27T10:00:00Z"
+        run={runFor({ goal: "at-home strength training for beginners", platform: "Any", audience: "", vibe: "" })}
         label="Run detail"
         onExport={vi.fn()}
       />,
@@ -152,8 +157,7 @@ describe("RunContext", () => {
   it("lists audience and tone when the brief supplied them", () => {
     render(
       <RunContext
-        brief={{ goal: "a slow-fashion label", platform: "Instagram", audience: "Gen Z", vibe: "warm" }}
-        createdAt="2026-09-27T10:00:00Z"
+        run={runFor({ goal: "a slow-fashion label", platform: "Instagram", audience: "Gen Z", vibe: "warm" })}
         label="Run detail"
         onExport={vi.fn()}
       />,

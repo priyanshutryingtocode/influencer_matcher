@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { api, ApiError } from "../api/client";
@@ -10,6 +10,7 @@ import { RunContext } from "../components/RunContext";
 import { SummaryMetrics } from "../components/RunSummary";
 import { WarningBanner } from "../components/WarningBanner";
 import { useMatchJob } from "../hooks/useMatchJob";
+import { useResource } from "../hooks/useResource";
 import type { Brief, MatchJob, Meta, RunDetail } from "../types";
 
 const emptyBrief: Brief = {
@@ -58,17 +59,13 @@ function resolveLimits(meta: Meta | null): Meta["limits"] {
 }
 
 export function SearchPage() {
-  const [meta, setMeta] = useState<Meta | null>(null);
-  const [metaError, setMetaError] = useState<string | null>(null);
   const [brief, setBrief] = useState<Brief>(emptyBrief);
   const [topK, setTopK] = useState(10);
   const [topN, setTopN] = useState(5);
-  const [run, setRun] = useState<RunDetail | null>(null);
-  const [runError, setRunError] = useState<string | null>(null);
-  const [runLoading, setRunLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [metaAttempt, setMetaAttempt] = useState(0);
-  const [runAttempt, setRunAttempt] = useState(0);
+  // An export failure used to be written into the run-fetch error slot, so the
+  // Retry button next to it refetched the run instead of retrying the download.
+  const [exportError, setExportError] = useState<string | null>(null);
   const { job, error, isRunning, start } = useMatchJob();
   /* True once the user has submitted anything, whatever the outcome. The
    * workspace distinguishes "nothing here yet" from "your run failed" -- the
@@ -76,13 +73,12 @@ export function SearchPage() {
    * empty state reappear over the error. */
   const [hasStarted, setHasStarted] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    void api.getMeta()
-      .then((value) => {
-        if (!active) return;
-        setMeta(value);
-        setMetaError(null);
+  const meta = useResource<Meta>(
+    (signal) => api.getMeta({ signal }),
+    [],
+    {
+      fallbackError: "Could not load API metadata.",
+      onLoad: (value) => {
         setBrief((current) => ({
           // Every read is defaulted. The deployed API can be an older build than
           // this frontend -- a missing `defaults.goal` once threw
@@ -95,40 +91,22 @@ export function SearchPage() {
         }));
         setTopK(value.defaults?.top_k ?? 10);
         setTopN(value.defaults?.top_n ?? 5);
-      })
-      .catch((caught) => {
-        if (active) setMetaError(caught instanceof ApiError ? caught.message : "Could not load API metadata.");
-      });
-    return () => { active = false; };
-  }, [metaAttempt]);
+      },
+    },
+  );
 
-  useEffect(() => {
-    if (job?.status !== "succeeded") return;
-    if (job.outcome === "no_results") {
-      setRun(null);
-      setRunError(null);
-      return;
-    }
-    if (!job.run_id) return;
-    /* The shortlist fetch was keyed on `[status, run_id, outcome]`, all of
-     * which are stable once the job succeeds -- so a failure here was terminal.
-     * The run exists; the only way out was submitting a whole new match, which
-     * spends embedding and ranking quota to re-read a record we already have.
-     * `runAttempt` makes the fetch re-runnable, and the request is aborted on
-     * unmount so a navigation does not leave one in flight. */
-    const controller = new AbortController();
-    let active = true;
-    setRunError(null);
-    setRunLoading(true);
-    void api.getRun(job.run_id, { signal: controller.signal })
-      .then((value) => { if (active) setRun(value); })
-      .catch((caught) => {
-        if (!active || (caught instanceof DOMException && caught.name === "AbortError")) return;
-        setRunError(caught instanceof ApiError ? caught.message : "Could not load the completed run.");
-      })
-      .finally(() => { if (active) setRunLoading(false); });
-    return () => { active = false; controller.abort(); };
-  }, [job?.status, job?.run_id, job?.outcome, runAttempt]);
+  const run = useResource<RunDetail>(
+    (signal) => api.getRun(job!.run_id!, { signal }),
+    [job?.run_id],
+    {
+      // The job reports success before the shortlist is readable. Fetching only
+      // once a run_id exists keeps the "run exists but the fetch failed" case
+      // retryable, which was the whole point: re-reading a record we already
+      // have must not mean spending embedding and ranking quota on a new match.
+      enabled: job?.status === "succeeded" && Boolean(job.run_id) && job.outcome !== "no_results",
+      fallbackError: "Could not load the completed run.",
+    },
+  );
 
   function updateBrief(field: keyof Brief, value: string) {
     setBrief((current) => ({ ...current, [field]: value }));
@@ -137,14 +115,16 @@ export function SearchPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setHasStarted(true);
-    setRun(null);
-    setRunError(null);
+    run.setData(null);
+    run.setError(null);
     await start(brief, { top_k: topK, top_n: topN });
   }
 
-  const needsReindex = meta?.index.status === "reindex_required";
-  const disabled = meta ? meta.index.status !== "ready" : false;
-  const limits = resolveLimits(meta);
+  const metaValue = meta.data;
+  const runDetail = run.data;
+  const needsReindex = metaValue?.index.status === "reindex_required";
+  const disabled = metaValue ? metaValue.index.status !== "ready" : false;
+  const limits = resolveLimits(metaValue);
   // Read through a local rather than off the state object, so a brief missing
   // a field cannot throw on a later render.
   const goal = brief.goal ?? "";
@@ -153,7 +133,10 @@ export function SearchPage() {
   // The job reports success before its shortlist has been fetched. Without this
   // the workspace rendered nothing at all in that window -- the empty state is
   // for "no job yet" and the results are for "run loaded", so neither applied.
-  const awaitingRun = job?.status === "succeeded" && !run && (runLoading || !runError) && job.outcome !== "no_results";
+  const awaitingRun = job?.status === "succeeded"
+    && !runDetail
+    && (run.loading || !run.error)
+    && job.outcome !== "no_results";
 
   return (
     <section className="page-section">
@@ -161,29 +144,29 @@ export function SearchPage() {
         eyebrow="New match"
         title="Search"
         description="Look up creators based on your requirements."
-        meta={meta && (
+        meta={metaValue && (
           <span className={`readiness ${disabled ? "readiness-off" : "readiness-on"}`}>
             <span className="readiness-dot" />
             {needsReindex
               ? "Index needs re-embedding"
               : disabled
                 ? "Index unavailable"
-                : `${meta.index.count.toLocaleString()} creators indexed`}
+                : `${metaValue.index.count.toLocaleString()} creators indexed`}
           </span>
         )}
       />
 
-      {metaError && (
+      {meta.error && (
         <ErrorNote
           title="Connection issue"
-          action={<button className="btn btn-ghost" type="button" onClick={() => setMetaAttempt((n) => n + 1)}>Retry</button>}
+          action={<button className="btn btn-ghost" type="button" onClick={meta.retry}>Retry</button>}
         >
-          {metaError}
+          {meta.error}
         </ErrorNote>
       )}
-      {!meta && !metaError && <LoadingForm />}
+      {!metaValue && !meta.error && <LoadingForm />}
 
-      {meta && (
+      {metaValue && (
         <div className="match-workspace">
           <aside className="brief-rail">
             <div className="rail-heading"><span>Brief</span></div>
@@ -219,7 +202,7 @@ export function SearchPage() {
                 <label className="brief-field" htmlFor="platform">
                   <span>Platform</span>
                   <select id="platform" value={brief.platform} onChange={(event) => updateBrief("platform", event.target.value)}>
-                    {meta.platforms.map((platform) => <option key={platform}>{platform}</option>)}
+                    {metaValue.platforms.map((platform) => <option key={platform}>{platform}</option>)}
                   </select>
                 </label>
                 <label className="brief-field" htmlFor="audience">
@@ -255,20 +238,25 @@ export function SearchPage() {
 
           <div className="run-workspace">
             {job && <RunStatus job={job} isRunning={isRunning} />}
-            {(error || runError) && (
+            {(error || run.error) && (
               <ErrorNote
                 title="Request issue"
-                action={runError
-                  ? <button className="btn btn-ghost" type="button" onClick={() => setRunAttempt((n) => n + 1)}>Retry</button>
+                action={run.error
+                  ? <button className="btn btn-ghost" type="button" onClick={run.retry}>Retry</button>
                   : undefined}
               >
-                {error ?? runError}
+                {error ?? run.error}
+              </ErrorNote>
+            )}
+            {exportError && (
+              <ErrorNote title="Export issue">
+                {exportError}
               </ErrorNote>
             )}
             {/* `hasStarted` records that a submit happened, which survives the
               * hook clearing `job` on failure. The `!job` clause covers a job
               * restored without a local submit. */}
-            {!hasStarted && !job && !run && <EmptyWorkspace />}
+            {!hasStarted && !job && !runDetail && <EmptyWorkspace />}
             {job?.outcome === "no_results" && (
               <EmptyState
                 index="NO MATCH"
@@ -277,27 +265,24 @@ export function SearchPage() {
               />
             )}
             {awaitingRun && <LoadingResults />}
-            {run && (
+            {runDetail && (
               <div className="run-results">
                 <RunContext
-                  brief={run.brief}
-                  createdAt={run.created_at}
+                  run={runDetail}
                   label="Shortlist"
                   exporting={exporting}
                   onExport={() => {
                     if (exporting) return;
                     setExporting(true);
-                    void api.downloadRun(run.run_id)
-                      // Cleared on success, so a later good download does not
-                      // leave a stale failure sitting above the results.
-                      .then(() => setRunError(null))
-                      .catch((caught) => setRunError(caught instanceof ApiError ? caught.message : "Could not export the run."))
+                    setExportError(null);
+                    void api.downloadRun(runDetail.run_id)
+                      .catch((caught) => setExportError(caught instanceof ApiError ? caught.message : "Could not export the run."))
                       .finally(() => setExporting(false));
                   }}
                 />
-                <WarningBanner warnings={run.warnings} />
-                <SummaryMetrics summary={run.summary} />
-                <ResultList run={run} />
+                <WarningBanner warnings={runDetail.warnings} />
+                <SummaryMetrics summary={runDetail.summary} />
+                <ResultList run={runDetail} />
               </div>
             )}
           </div>

@@ -1,64 +1,55 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { api, ApiError } from "../api/client";
+import { api } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorNote, InfoNote } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
 import { SummaryMetrics } from "../components/RunSummary";
 import { WarningBanner } from "../components/WarningBanner";
+import { useResource } from "../hooks/useResource";
 import { formatDate } from "../format";
-import type { Comparison, RunDetail, RunListItem } from "../types";
+import type { Comparison, RunDetail, RunListItem, RunListResponse } from "../types";
 
 export function ComparePage() {
-  const [runs, setRuns] = useState<RunListItem[]>([]);
   const [runA, setRunA] = useState("");
   const [runB, setRunB] = useState("");
-  const [comparison, setComparison] = useState<Comparison | null>(null);
-  const [details, setDetails] = useState<{ a: RunDetail | null; b: RunDetail | null }>({ a: null, b: null });
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isComparing, setIsComparing] = useState(false);
-  const [listAttempt, setListAttempt] = useState(0);
 
-  useEffect(() => {
-    let active = true;
-    void api.listRuns()
-      .then((response) => {
-        if (!active) return;
-        setRuns(response.items);
+  const list = useResource<RunListResponse>(
+    (signal) => api.listRuns(undefined, { signal }),
+    [],
+    {
+      fallbackError: "Could not load saved runs.",
+      onLoad: (response) => {
         setRunA(response.items[0]?.run_id ?? "");
         setRunB(response.items[1]?.run_id ?? "");
-      })
-      .catch((caught) => {
-        if (active) setError(caught instanceof ApiError ? caught.message : "Could not load saved runs.");
-      })
-      .finally(() => { if (active) setIsLoading(false); });
-    return () => { active = false; };
-  }, [listAttempt]);
+      },
+    },
+  );
+  const runs = list.data?.items ?? [];
 
-  useEffect(() => {
-    if (!runA || !runB || runA === runB) {
-      setComparison(null);
-      setDetails({ a: null, b: null });
-      setIsComparing(false);
-      return;
-    }
-    let active = true;
-    setIsComparing(true);
-    setError(null);
-    void Promise.all([api.compareRuns(runA, runB), api.getRun(runA), api.getRun(runB)])
-      .then(([nextComparison, detailA, detailB]) => {
-        if (!active) return;
-        setComparison(nextComparison);
-        setDetails({ a: detailA, b: detailB });
-      })
-      .catch((caught) => {
-        if (active) setError(caught instanceof ApiError ? caught.message : "Could not compare those runs.");
-      })
-      .finally(() => { if (active) setIsComparing(false); });
-    return () => { active = false; };
-  }, [runA, runB]);
+  // Two errors, not one. The list fetch and the compare fetch shared an `error`
+  // slot, so a failed comparison could render the "could not load saved runs"
+  // panel, and a failed list could blank the toolbar with a comparison message.
+  const ready = Boolean(runA && runB && runA !== runB);
+  const compare = useResource<{ comparison: Comparison; details: Details }>(
+    async (signal) => {
+      const [comparison, detailA, detailB] = await Promise.all([
+        api.compareRuns(runA, runB),
+        api.getRun(runA, { signal }),
+        api.getRun(runB, { signal }),
+      ]);
+      return { comparison, details: { a: detailA, b: detailB } };
+    },
+    [runA, runB],
+    { enabled: ready, fallbackError: "Could not compare those runs." },
+  );
+  // Derived rather than reset: an unselectable pair reads as "no comparison"
+  // without an effect clearing state the render has already decided is stale.
+  const emptyDetails: Details = { a: null, b: null };
+  const comparison = ready ? compare.data?.comparison ?? null : null;
+  const details = ready ? compare.data?.details ?? emptyDetails : emptyDetails;
+  const isComparing = compare.loading;
 
   const sharedKeys = useMemo(
     () => new Set(comparison?.shared_creators.map((creator) => creator.creator_key) ?? []),
@@ -70,18 +61,18 @@ export function ComparePage() {
     setRunB(runA);
   }
 
-  if (isLoading) return <div className="loading-panel page-section">Loading saved runs...</div>;
+  if (list.loading) return <div className="loading-panel page-section">Loading saved runs...</div>;
   // A failed list is not an empty list. Rendering the "save two shortlists"
   // state underneath the error told the user to go and do something they had
   // already done, and offered no way back.
-  if (error && !runs.length) {
+  if (list.error && !runs.length) {
     return (
       <section className="page-section">
         <ErrorNote
-          title="Comparison issue"
-          action={<button className="btn btn-ghost" type="button" onClick={() => setListAttempt((n) => n + 1)}>Retry</button>}
+          title="Archive issue"
+          action={<button className="btn btn-ghost" type="button" onClick={list.retry}>Retry</button>}
         >
-          {error}
+          {list.error}
         </ErrorNote>
       </section>
     );
@@ -105,7 +96,14 @@ export function ComparePage() {
         title="Put two shortlists side by side."
         description="See what stayed, what changed, and where the quality moved."
       />
-      {error && <ErrorNote title="Comparison issue">{error}</ErrorNote>}
+      {compare.error && (
+        <ErrorNote
+          title="Comparison issue"
+          action={<button className="btn btn-ghost" type="button" onClick={compare.retry}>Retry</button>}
+        >
+          {compare.error}
+        </ErrorNote>
+      )}
 
       <div className="compare-toolbar">
         <RunSelect label="Run A" value={runA} runs={runs} onChange={setRunA} />
@@ -129,6 +127,8 @@ export function ComparePage() {
     </section>
   );
 }
+
+type Details = { a: RunDetail | null; b: RunDetail | null };
 
 function RunSelect({ label, value, runs, onChange }: { label: string; value: string; runs: RunListItem[]; onChange: (value: string) => void }) {
   return (
