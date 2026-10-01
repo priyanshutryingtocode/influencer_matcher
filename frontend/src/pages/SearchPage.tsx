@@ -64,8 +64,10 @@ export function SearchPage() {
   const [topN, setTopN] = useState(5);
   const [run, setRun] = useState<RunDetail | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [runLoading, setRunLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [metaAttempt, setMetaAttempt] = useState(0);
+  const [runAttempt, setRunAttempt] = useState(0);
   const { job, error, isRunning, start } = useMatchJob();
   /* True once the user has submitted anything, whatever the outcome. The
    * workspace distinguishes "nothing here yet" from "your run failed" -- the
@@ -107,12 +109,25 @@ export function SearchPage() {
       return;
     }
     if (!job.run_id) return;
+    /* The shortlist fetch was keyed on `[status, run_id, outcome]`, all of
+     * which are stable once the job succeeds -- so a failure here was terminal.
+     * The run exists; the only way out was submitting a whole new match, which
+     * spends embedding and ranking quota to re-read a record we already have.
+     * `runAttempt` makes the fetch re-runnable, and the request is aborted on
+     * unmount so a navigation does not leave one in flight. */
+    const controller = new AbortController();
     let active = true;
-    void api.getRun(job.run_id)
+    setRunError(null);
+    setRunLoading(true);
+    void api.getRun(job.run_id, { signal: controller.signal })
       .then((value) => { if (active) setRun(value); })
-      .catch((caught) => { if (active) setRunError(caught instanceof ApiError ? caught.message : "Could not load the completed run."); });
-    return () => { active = false; };
-  }, [job?.status, job?.run_id, job?.outcome]);
+      .catch((caught) => {
+        if (!active || (caught instanceof DOMException && caught.name === "AbortError")) return;
+        setRunError(caught instanceof ApiError ? caught.message : "Could not load the completed run.");
+      })
+      .finally(() => { if (active) setRunLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [job?.status, job?.run_id, job?.outcome, runAttempt]);
 
   function updateBrief(field: keyof Brief, value: string) {
     setBrief((current) => ({ ...current, [field]: value }));
@@ -137,7 +152,7 @@ export function SearchPage() {
   // The job reports success before its shortlist has been fetched. Without this
   // the workspace rendered nothing at all in that window -- the empty state is
   // for "no job yet" and the results are for "run loaded", so neither applied.
-  const awaitingRun = job?.status === "succeeded" && !run && !runError && job.outcome !== "no_results";
+  const awaitingRun = job?.status === "succeeded" && !run && (runLoading || !runError) && job.outcome !== "no_results";
 
   return (
     <section className="page-section">
@@ -239,7 +254,16 @@ export function SearchPage() {
 
           <div className="run-workspace">
             {job && <RunStatus job={job} isRunning={isRunning} />}
-            {(error || runError) && <ErrorNote title="Request issue">{error ?? runError}</ErrorNote>}
+            {(error || runError) && (
+              <ErrorNote
+                title="Request issue"
+                action={runError
+                  ? <button className="btn btn-ghost" type="button" onClick={() => setRunAttempt((n) => n + 1)}>Retry</button>
+                  : undefined}
+              >
+                {error ?? runError}
+              </ErrorNote>
+            )}
             {/* `hasStarted` records that a submit happened, which survives the
               * hook clearing `job` on failure. The `!job` clause covers a job
               * restored without a local submit. */}
@@ -257,6 +281,9 @@ export function SearchPage() {
                     if (exporting) return;
                     setExporting(true);
                     void api.downloadRun(run.run_id)
+                      // Cleared on success, so a later good download does not
+                      // leave a stale failure sitting above the results.
+                      .then(() => setRunError(null))
                       .catch((caught) => setRunError(caught instanceof ApiError ? caught.message : "Could not export the run."))
                       .finally(() => setExporting(false));
                   }}

@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   getMeta: vi.fn(),
   getRun: vi.fn(),
   createMatchJob: vi.fn(),
+  downloadRun: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
@@ -24,7 +25,24 @@ const matchJobState = vi.hoisted(() => ({
 }));
 
 function makeJob(stage: string, status = "running") {
-  return { status, stage, outcome: null, run_id: null };
+  return { status, stage, outcome: null, run_id: null } as {
+    status: string;
+    stage: string;
+    outcome: string | null;
+    run_id: string | null;
+  };
+}
+
+function sampleRun() {
+  return {
+    run_id: "run-1",
+    created_at: "2026-01-01T00:00:00Z",
+    brief: { goal: "high-energy at-home strength training", platform: "Any", audience: "", vibe: "" },
+    summary: { n_results: 1, avg_match_pct: 70, n_strong: 1, n_weak: 0, avg_engagement_pct: 4, median_followers: 1000 },
+    warnings: [],
+    candidates: [],
+    ranked: [],
+  };
 }
 
 vi.mock("../hooks/useMatchJob", () => ({
@@ -63,6 +81,7 @@ describe("SearchPage", () => {
   beforeEach(() => {
     apiMocks.getMeta.mockReset();
     apiMocks.getRun.mockReset();
+    apiMocks.downloadRun.mockReset();
     matchJobState.job = null;
     matchJobState.error = null;
     matchJobState.isRunning = false;
@@ -300,6 +319,51 @@ describe("SearchPage", () => {
 
     expect(await screen.findByText("Loading your shortlist")).toBeTruthy();
     expect(screen.queryByText("Set a brief.")).toBeNull();
+  });
+
+  /* The shortlist fetch was keyed on [status, run_id, outcome] -- all stable
+   * once the job succeeds -- so a failure was terminal. The run exists; the
+   * only recovery was a new match, which spends embedding and ranking quota to
+   * re-read a record already stored. */
+  it("offers a retry when the completed run cannot be loaded", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    // A plain Error, not the mocked ApiError, so the page takes its generic
+    // branch -- the point here is that a failure is retryable at all.
+    apiMocks.getRun.mockRejectedValueOnce(new Error("boom"));
+    matchJobState.job = makeJob("complete", "succeeded");
+    matchJobState.job.run_id = "run-1";
+    renderPage();
+
+    expect(await screen.findByText(/could not load the completed run/i)).toBeTruthy();
+    expect(screen.queryByText("Loading your shortlist")).toBeNull();
+
+    // The retry must re-read the run rather than ask for a whole new match.
+    apiMocks.getRun.mockResolvedValue(sampleRun());
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /high-energy at-home strength training/ })).toBeTruthy());
+    expect(apiMocks.getRun).toHaveBeenCalledTimes(2);
+    expect(matchJobState.start).not.toHaveBeenCalled();
+  });
+
+  it("clears a previous export failure when a later download succeeds", async () => {
+    apiMocks.getMeta.mockResolvedValue(makeMeta());
+    apiMocks.getRun.mockResolvedValue(sampleRun());
+    apiMocks.downloadRun.mockRejectedValueOnce(new Error("Could not export the run."));
+    matchJobState.job = makeJob("complete", "succeeded");
+    matchJobState.job.run_id = "run-1";
+    renderPage();
+
+    // Scoped to the results heading: a suggestion chip carries similar wording.
+    await screen.findByRole("heading", { name: /high-energy at-home strength training/ });
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    expect(await screen.findByText(/could not export/i)).toBeTruthy();
+
+    apiMocks.downloadRun.mockResolvedValue(undefined);
+    const button = await screen.findByRole("button", { name: "Export CSV" });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.queryByText(/could not export/i)).toBeNull());
   });
 
   it("does not show the loading state once the run has arrived", async () => {
