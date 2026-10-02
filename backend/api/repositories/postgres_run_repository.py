@@ -49,9 +49,9 @@ class PostgresRunRepository:
             row = conn.execute(
                 """
                 INSERT INTO match_runs
-                    (id, owner_id, brief, params, pipeline, result, warnings, summary)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id, owner_id, brief, params, pipeline, result, warnings, summary,
+                    (id, owner_id, brief, params, result, warnings, summary)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, owner_id, brief, params, result, warnings, summary,
                           created_at, updated_at
                 """,
                 (
@@ -59,7 +59,6 @@ class PostgresRunRepository:
                     owner,
                     Jsonb(record["brief"]),
                     Jsonb(record["params"]),
-                    Jsonb(record["pipeline"]),
                     Jsonb(record["result"]),
                     Jsonb(record["warnings"]),
                     Jsonb(record["summary"]),
@@ -115,7 +114,7 @@ class PostgresRunRepository:
         with self._connection_factory() as conn:
             row = conn.execute(
                 f"""
-                SELECT id, owner_id, brief, params, pipeline, result, warnings, summary,
+                SELECT id, owner_id, brief, params, result, warnings, summary,
                        created_at, updated_at
                 FROM match_runs
                 WHERE {where}
@@ -145,12 +144,11 @@ def _record_from_row(row) -> dict:
         "owner_id": row[1],
         "brief": row[2],
         "params": row[3],
-        "pipeline": row[4],
-        "result": row[5],
-        "warnings": row[6],
-        "summary": row[7],
-        "created_at": row[8],
-        "updated_at": row[9],
+        "result": row[4],
+        "warnings": row[5],
+        "summary": row[6],
+        "created_at": row[7],
+        "updated_at": row[8],
     }
 
 

@@ -31,14 +31,12 @@ class JobManager:
         repository,
         matcher: Callable | None = None,
         client_factory: Callable | None = None,
-        indexed_count_provider: Callable[[], int | None] | None = None,
         max_workers: int = 1,
         max_jobs: int = 4,
     ):
         self._repository = repository
         self._matcher = matcher or self._default_match
         self._client_factory = client_factory or get_client
-        self._indexed_count_provider = indexed_count_provider or (lambda: None)
         self._max_jobs = max_jobs
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="match-job")
         self._lock = RLock()
@@ -108,11 +106,7 @@ class JobManager:
                 )
                 return
             self._update(job_id, stage="persisting")
-            record = build_run_record(
-                result,
-                uuid4(),
-                indexed_count=self._indexed_count_provider(),
-            )
+            record = build_run_record(result, uuid4())
             record["owner_id"] = owner_id
             saved = self._repository.create(record)
             self._update(

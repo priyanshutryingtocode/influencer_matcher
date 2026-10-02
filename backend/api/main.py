@@ -116,7 +116,6 @@ def create_app(
             # restart loses an in-flight match; completed runs are persisted.
             manager = JobManager(
                 repo,
-                indexed_count_provider=lambda: application.state.indexed_count,
                 max_jobs=config.MAX_MEMORY_JOBS,
             )
             application.state.job_manager = manager

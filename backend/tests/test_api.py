@@ -117,7 +117,6 @@ def test_job_manager_persists_match():
     manager = JobManager(
         repository,
         matcher=lambda job_id, brief, params: make_result(),
-        indexed_count_provider=lambda: 10,
     )
     response = manager.submit(Brief(goal="high-energy strength training for beginners", platform="TikTok"), MatchParams(top_k=2, top_n=1))
     for _ in range(50):
@@ -172,7 +171,7 @@ def test_api_health_meta_and_match_job():
 def test_api_runs_export_compare_and_delete():
     repository = MemoryRepository()
     run_id = uuid4()
-    repository.create(build_run_record(make_result(), run_id, indexed_count=10))
+    repository.create(build_run_record(make_result(), run_id))
     app = create_app(
         repository=repository,
         job_manager=MemoryJobManager(),

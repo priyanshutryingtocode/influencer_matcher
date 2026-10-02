@@ -183,12 +183,10 @@ class RunListResponse(BaseModel):
 
 
 class RunDetail(BaseModel):
-    schema_version: str = "1.0"
     run_id: UUID
     created_at: datetime
     brief: BriefPayload
     params: MatchParams
-    pipeline: dict[str, Any]
     warnings: list[Warning] = Field(default_factory=list)
     summary: RunSummary
     candidates: list[CreatorSnapshot]

@@ -166,7 +166,7 @@ def build_summary(candidates: list[dict], ranked: list[dict]) -> dict:
     ).model_dump(mode="json")
 
 
-def build_run_record(result: dict, run_id: UUID, indexed_count: int | None = None) -> dict:
+def build_run_record(result: dict, run_id: UUID) -> dict:
     brief: Brief = result["brief"]
     params: dict[str, int] = result["params"]
     candidates: list[Influencer] = result["candidates"]
@@ -182,12 +182,6 @@ def build_run_record(result: dict, run_id: UUID, indexed_count: int | None = Non
         "id": run_id,
         "brief": brief_to_payload(brief),
         "params": MatchParams(**params).model_dump(mode="json"),
-        "pipeline": {
-            "embedding_model": config.EMBED_MODEL,
-            "embed_dimensions": config.EMBED_DIMENSIONS,
-            "gemini_model": config.GEN_MODEL,
-            "indexed_creator_count": indexed_count,
-        },
         "result": {
             "candidates": candidate_snapshots,
             "ranked": ranked_snapshots,
@@ -205,7 +199,6 @@ def run_detail(record: dict) -> RunDetail:
             "created_at": record["created_at"],
             "brief": record["brief"],
             "params": record["params"],
-            "pipeline": record["pipeline"],
             "warnings": record["warnings"],
             "summary": record["summary"],
             "candidates": result["candidates"],

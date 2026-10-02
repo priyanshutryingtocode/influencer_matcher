@@ -32,7 +32,7 @@ def make_run(fits, tags, similarities=None):
             for i, fit in enumerate(fits)
         ],
     }
-    record = build_run_record(result, uuid4(), indexed_count=10)
+    record = build_run_record(result, uuid4())
     now = datetime.now(timezone.utc)
     record["created_at"] = now
     record["updated_at"] = now

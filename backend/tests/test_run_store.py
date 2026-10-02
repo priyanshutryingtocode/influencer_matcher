@@ -41,7 +41,7 @@ def make_run(goal="at-home strength training for gen z", platform="Any", n=3) ->
 
 
 def stored_run(n=3):
-    record = build_run_record(make_run(n=n), uuid4(), indexed_count=10)
+    record = build_run_record(make_run(n=n), uuid4())
     now = datetime.now(timezone.utc)
     record["created_at"] = now
     record["updated_at"] = now
@@ -70,13 +70,13 @@ def test_even_shortlist_summary_rounds_median_followers():
     run = make_run(n=2)
     run["candidates"][0].followers = 10_001
     run["candidates"][1].followers = 20_000
-    record = build_run_record(run, uuid4(), indexed_count=10)
+    record = build_run_record(run, uuid4())
     assert record["summary"]["median_followers"] == 15_000
 
 
 def test_build_csv_contents_and_formula_protection():
     run = make_run(n=2)
-    record = build_run_record(run, uuid4(), indexed_count=10)
+    record = build_run_record(run, uuid4())
     record["created_at"] = datetime.now(timezone.utc)
     record["updated_at"] = record["created_at"]
     record["result"]["candidates"][0]["handle"] = "=danger"
@@ -98,7 +98,7 @@ def test_csv_of_a_run_stored_before_the_taxonomy_removed():
     raising, which is what keeps an old run readable.
     """
     run = make_run(n=1)
-    record = build_run_record(run, uuid4(), indexed_count=10)
+    record = build_run_record(run, uuid4())
     record["result"]["candidates"][0]["niche"] = "Fitness"
     record["result"]["candidates"][0]["secondary_niches"] = ["Yoga"]
     record["created_at"] = datetime.now(timezone.utc)
@@ -116,7 +116,7 @@ def test_csv_exports_the_new_signals():
     candidate.sponsored_ratio = 0.12
     candidate.growth_trend = "rising"
     candidate.audience_top_countries = ["USA", "Canada"]
-    record = build_run_record(run, uuid4(), indexed_count=10)
+    record = build_run_record(run, uuid4())
     record["created_at"] = datetime.now(timezone.utc)
     record["updated_at"] = record["created_at"]
 
@@ -130,7 +130,7 @@ def test_csv_exports_the_new_signals():
 def test_csv_exports_grounded_claims():
     run = make_run(n=1)
     run["ranked"][0]["grounding"] = [{"field": "tags", "quote": "gym"}]
-    record = build_run_record(run, uuid4(), indexed_count=10)
+    record = build_run_record(run, uuid4())
     record["created_at"] = datetime.now(timezone.utc)
     record["updated_at"] = record["created_at"]
 
@@ -140,7 +140,7 @@ def test_csv_exports_grounded_claims():
 
 @pytest.mark.parametrize("run_id", [uuid4(), uuid4()])
 def test_run_records_have_unique_identifiers(run_id):
-    record = build_run_record(make_run(n=1), run_id, indexed_count=10)
+    record = build_run_record(make_run(n=1), run_id)
     assert record["id"] == run_id
 
 
@@ -158,7 +158,7 @@ def test_fallback_reason_survives_a_store_and_reread():
     run = make_run(n=1)
     run["ranked"][0].update(source="fallback", fallback_reason=reason)
 
-    record = build_run_record(run, uuid4(), indexed_count=10)
+    record = build_run_record(run, uuid4())
     now = datetime.now(timezone.utc)
     record["created_at"] = now
     record["updated_at"] = now
@@ -177,7 +177,7 @@ def test_csv_includes_the_fallback_reason():
         source="fallback",
         fallback_reason=f"{QUOTA_REASON_TAG}: exhausted",
     )
-    record = build_run_record(run, uuid4(), indexed_count=10)
+    record = build_run_record(run, uuid4())
     record["created_at"] = datetime.now(timezone.utc)
     record["updated_at"] = record["created_at"]
 
@@ -229,3 +229,40 @@ def test_a_quota_fallback_is_still_an_error_severity():
         [{"source": "fallback", "fallback_reason": f"{QUOTA_REASON_TAG}: spent"}]
     )[0]
     assert warning["severity"] == "error"
+
+
+def test_row_mapping_matches_the_column_order_the_repository_selects():
+    """Pin the positional mapping in `_record_from_row`.
+
+    The run-detail tests above pass a dict, so they never touch it: the mapping
+    is the one place where removing a column from the SELECT silently shifts
+    every field after it, returning a wrong-but-plausible run. Dropping the
+    `pipeline` column is exactly that case.
+    """
+    from api.repositories.postgres_run_repository import _record_from_row
+
+    columns = [
+        "id", "owner_id", "brief", "params", "result", "warnings",
+        "summary", "created_at", "updated_at",
+    ]
+    sentinels = {
+        "id": "ID", "owner_id": "OWNER", "brief": {"goal": "g"},
+        "params": {"top_k": 10}, "result": {"candidates": [], "ranked": []},
+        "warnings": [{"code": "w"}], "summary": {"n_results": 1},
+        "created_at": "CREATED", "updated_at": "UPDATED",
+    }
+    row = tuple(sentinels[name] for name in columns)
+
+    mapped = _record_from_row(row)
+
+    assert set(mapped) == set(columns), "every selected column must be mapped"
+    for name in columns:
+        assert mapped[name] == sentinels[name], f"{name} read from the wrong index"
+
+
+def test_run_record_no_longer_carries_provenance():
+    """`pipeline` was written to every run and never displayed by any client."""
+    record = stored_run()
+
+    assert "pipeline" not in record
+    assert "indexed_creator_count" not in record
