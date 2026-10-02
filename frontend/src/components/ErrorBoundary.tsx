@@ -1,7 +1,7 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 
-import { ErrorNote } from "./SystemNote";
+import { ErrorNote, NOTE_TITLES } from "./SystemNote";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -12,14 +12,10 @@ interface ErrorBoundaryState {
 }
 
 /** Contains a render crash to one panel instead of blanking the page.
- *
- * A runtime error in a React tree unmounts the whole tree by default, so a
- * single bad read -- a field missing from an older API response, say -- leaves
- * the user staring at a white screen with no way back. This catches it, shows
- * the same `ErrorNote` every other failure uses, and offers a retry.
- *
- * A class component because `getDerivedStateFromError` has no hook equivalent.
- */
+ * A runtime error unmounts the whole tree, so one bad read from an older API
+ * leaves a white screen with no way back. A class component because
+ * getDerivedStateFromError has no hook equivalent. */
+
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { error: null };
 
@@ -41,7 +37,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return (
       <div className="page-section">
         <ErrorNote
-          title="Something broke on this page"
+          title={NOTE_TITLES.crashed}
           action={(
             <button className="btn btn-secondary" type="button" onClick={this.reset}>
               Try again

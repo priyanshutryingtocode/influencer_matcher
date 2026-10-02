@@ -22,16 +22,10 @@ export interface ResourceOptions<T> {
   onLoad?: (value: T) => void;
 }
 
-/**
- * The fetch-once-retry-on-demand shape that was hand-written in every page:
- * a data slot, an error slot, a loading flag, an attempt counter, an `active`
- * guard for unmount, an AbortController, and a retry button wired to the
- * counter. Six pages each had their own copy, and they had drifted -- some
- * cleared the error on retry, some did not, and only some aborted in flight.
- *
- * The loader is held in a ref so a new inline closure each render does not
- * retrigger the effect; `deps` is the explicit list of things that should.
- */
+/** One place for the fetch/retry/abort shape every page was open-coding.
+ * The loader is held in a ref so an inline closure does not retrigger the
+ * effect; `deps` is the explicit list of what should. */
+
 export function useResource<T>(
   load: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],

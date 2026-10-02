@@ -17,6 +17,12 @@ HEADLINE_KEYS = {
     "dataset_size",
     "case_count",
     "mean_retrieval_tag_precision_at_k",
+    # The comparable pair. These three are what make a reranking claim
+    # attributable: the retriever's own ordering and the ranker's, both at n,
+    # plus the difference between them.
+    "mean_retrieval_tag_precision_at_n",
+    "mean_ranked_tag_precision_at_n",
+    "mean_ranking_gain_at_n",
     "mean_recall_of_ceiling_at_k",
     "mean_recall_of_ceiling_at_n",
     "mean_topic_overlap_at_k",
@@ -29,14 +35,22 @@ HEADLINE_KEYS = {
 def written_report(tmp_path_factory):
     """Run the evaluator once against the live schema with the model stubbed."""
     import evaluate as ev
-    from src.models import Brief
 
     out = tmp_path_factory.mktemp("reports") / "report.json"
-    ev._run_case = _stub_case
-    ev.get_client = lambda: object()
-    ev.embed_query = lambda text: [0.0] * 768
-    ev.PostgresRunRepository = _StubRepository
-    ev.vector_store = _StubVectorStore
+    # Restored in the finally below. These are plain attribute assignments on the
+    # evaluate module, so without that they outlive the fixture: _run_case stayed
+    # replaced by the stub for the rest of the session, and any later test that
+    # called the real _run_case silently exercised the stub instead.
+    patched = {
+        "_run_case": _stub_case,
+        "get_client": lambda: object(),
+        "embed_query": lambda text: [0.0] * 768,
+        "PostgresRunRepository": _StubRepository,
+        "vector_store": _StubVectorStore,
+    }
+    originals = {name: getattr(ev, name) for name in patched}
+    for name, value in patched.items():
+        setattr(ev, name, value)
     # --rate-limit-per-min is raised so the sequential pacing does not spend a
     # minute of the suite sleeping; it is a report-shape test, not a latency
     # measurement, and the values are stubbed anyway.
@@ -48,16 +62,18 @@ def written_report(tmp_path_factory):
         "--no-query-cache",
     ]
     import sys
-    original = sys.argv
+    original_argv = sys.argv
     sys.argv = monkey_argv
     try:
         ev.main()
     finally:
-        sys.argv = original
+        sys.argv = original_argv
+        for name, value in originals.items():
+            setattr(ev, name, value)
     return json.loads(out.read_text(encoding="utf-8"))
 
 
-def _stub_case(client, conn, case, top_k, top_n, query_cache=None):
+def _stub_case(client, case, top_k, top_n, query_cache=None):
     return {
         "id": case["id"],
         "expected_tags": sorted(case["expected_tags"]),
@@ -68,6 +84,10 @@ def _stub_case(client, conn, case, top_k, top_n, query_cache=None):
         "retrieval_tag_hit_at_k": True,
         "topic_overlap_at_k": 0.1,
         "ranked_tag_precision_at_n": 0.4,
+        # Consistent with the pair above: the reranker took 0.25 -> 0.4, so the
+        # headline mean must come out as exactly that difference.
+        "retrieval_tag_precision_at_n": 0.25,
+        "ranking_gain_at_n": 0.15,
         "pool_size": 12,
         "ceiling_precision_at_k": 1.0,
         "recall_of_ceiling_at_k": 0.5,

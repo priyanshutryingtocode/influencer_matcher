@@ -84,7 +84,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--limit", type=positive_int(),
         help="Embed only the first N profiles and write nothing. Use it to smoke "
-             "test the embedding API before spending a full reindex's quota.",
+             "test the embedding API before spending a full reindex's quota. Takes "
+             "precedence over --index-only: combining them will not write either.",
     )
     parser.add_argument(
         "--embed-cache", type=Path,
@@ -113,7 +114,18 @@ def ensure_indexed(args) -> None:
     write -- if anything fails partway (bad key, network, quota), nothing
     here has touched the database yet, so existing indexed data survives.
     """
-    embed_only = bool(args.limit) and not args.index_only
+    # `--limit` is the only flag that can suppress a write, so it is checked on
+    # its own. It used to be `bool(args.limit) and not args.index_only`, which
+    # meant `--limit 5 --index-only` fell through to replace_influencers() and
+    # TRUNCATEd the live index down to 5 rows. `--limit` is documented as writing
+    # nothing, so it wins over --index-only regardless of how the two combine.
+    embed_only = bool(args.limit)
+    if args.limit and args.index_only:
+        print(
+            "Ignoring --index-only: --limit never writes, and combining the two "
+            "would otherwise have replaced the live index with the first "
+            f"{args.limit} profiles.",
+        )
 
     if not embed_only:
         with vector_store.get_connection() as conn:

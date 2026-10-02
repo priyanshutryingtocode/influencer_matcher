@@ -38,7 +38,7 @@ from src.models import Brief
 
 BACKEND_ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES = BACKEND_ROOT / "data" / "evaluation_cases.json"
-DEFAULT_OUTPUT = BACKEND_ROOT / "reports" / "evaluation-report.json"
+REPORTS_DIR = BACKEND_ROOT / "reports"
 DEFAULT_QUERY_CACHE = BACKEND_ROOT / ".embed-cache"
 
 
@@ -57,7 +57,12 @@ def default_query_cache_path() -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate influencer retrieval and ranking quality.")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES, help="JSON golden-brief dataset")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="JSON metrics output (written to reports/)")
+    parser.add_argument(
+        "--output", type=Path, default=None,
+        help="JSON metrics output. Defaults to reports/evaluation-<rows>.json, named "
+             "for the dataset it measured, so runs at different corpus sizes cannot "
+             "overwrite or be mistaken for each other.",
+    )
     parser.add_argument("--top-k", type=int, default=config.DEFAULT_TOP_K_RETRIEVAL)
     parser.add_argument("--top-n", type=int, default=config.DEFAULT_TOP_N_RANKED)
     parser.add_argument(
@@ -168,12 +173,7 @@ def _warmup(conn) -> None:
     vector_store.search(conn, query_embedding=query_vec, platform="Any", top_k=1)
 
 
-def _run_case_in_own_connection(client, case: dict, top_k: int, top_n: int, query_cache=None) -> dict:
-    with vector_store.get_connection() as conn:
-        return _run_case(client, conn, case, top_k, top_n, query_cache)
-
-
-def _run_case(client, conn, case: dict, top_k: int, top_n: int, query_cache=None) -> dict:
+def _run_case(client, case: dict, top_k: int, top_n: int, query_cache=None) -> dict:
     brief = Brief(
         goal=case["goal"], platform=case.get("platform", "Any"),
         audience=case.get("audience", ""), vibe=case.get("vibe", ""),
@@ -199,7 +199,16 @@ def _run_case(client, conn, case: dict, top_k: int, top_n: int, query_cache=None
     ranked_candidates = [candidate_by_id[item["id"]] for item in ranked]
     retrieved_correct = sum(1 for c in candidates if expected_tags & set(c.tags))
     ranked_correct = sum(1 for c in ranked_candidates if expected_tags & set(c.tags))
-    pool = pool_for(conn, expected_tags, brief.platform)
+    # The pool is the only database work this case does, and it happens after
+    # ranking. It used to run against a connection checked out at the top of the
+    # case, which meant holding a pool slot across the embedding round trip, the
+    # vector search and the ranking call. A window fires len(window) cases at
+    # once -- 10 by default -- against a pool with max_size=4, so most threads
+    # spent the case blocked on the pool while holding nothing. Taking the
+    # connection here instead makes the database a short, uncontended step at
+    # the end, and lets concurrency follow the rate limit rather than max_size.
+    with vector_store.get_connection() as conn:
+        pool = pool_for(conn, expected_tags, brief.platform)
     result = {
         "id": case["id"],
         "expected_tags": sorted(expected_tags),
@@ -217,6 +226,20 @@ def _run_case(client, conn, case: dict, top_k: int, top_n: int, query_cache=None
             mean(overlap_ratio(brief_terms, candidate) for candidate in candidates), 3
         ) if candidates else 0.0,
         "ranked_tag_precision_at_n": round(tag_precision(ranked_candidates, expected_tags), 3),
+            # The retriever's own ordering, scored at the *same* cutoff the
+            # ranked list is scored at. Without this the only retrieval number
+            # is precision@k while the only ranking number is precision@n, so
+            # the two get compared across different cutoffs and the difference
+            # gets read as a ranking win. Both are computed from the candidate
+            # list already in hand, so this costs nothing.
+            "retrieval_tag_precision_at_n": round(tag_precision(candidates[:top_n], expected_tags), 3),
+            # What the reranker added over the retriever: same candidates, same
+            # cutoff, only the order differs.
+            "ranking_gain_at_n": round(
+                tag_precision(ranked_candidates, expected_tags)
+                - tag_precision(candidates[:top_n], expected_tags),
+                3,
+            ),
         "pool_size": pool,
         "ceiling_precision_at_k": round(ceiling_precision(pool, top_k), 3),
         "recall_of_ceiling_at_k": round(recall_of_ceiling(retrieved_correct, pool, top_k), 3),
@@ -262,8 +285,7 @@ def main() -> None:
         for idx, case in enumerate(cases):
             if idx > 0:
                 time.sleep(spacing)
-            with vector_store.get_connection() as conn:
-                case_results[idx] = _run_case(client, conn, case, args.top_k, args.top_n, query_cache)
+            case_results[idx] = _run_case(client, case, args.top_k, args.top_n, query_cache)
     else:
         windows = batch_windows(len(cases), args.rate_limit_per_min)
         for w, window in enumerate(windows):
@@ -272,13 +294,13 @@ def main() -> None:
                 print(f"Window {w + 1}/{len(windows)}: cases "
                       f"{window[0] + 1}-{window[-1] + 1} firing concurrently...")
             with ThreadPoolExecutor(max_workers=len(window)) as pool:
-                # One connection per case: the pool query is the only
-                # per-case database work, and a shared connection would
-                # serialise it for no benefit.
+                # No connection is passed in: each case takes one for its own
+                # pool_for query at the end, rather than holding a pool slot for
+                # the whole case. See the note in _run_case.
                 futures = {}
                 for idx in window:
                     futures[idx] = pool.submit(
-                        _run_case_in_own_connection, client, cases[idx], args.top_k, args.top_n,
+                        _run_case, client, cases[idx], args.top_k, args.top_n,
                         query_cache,
                     )
                 for idx, future in futures.items():
@@ -300,6 +322,10 @@ def main() -> None:
         "mean_retrieval_tag_precision_at_k": round(mean(item["retrieval_tag_precision_at_k"] for item in report_results), 3),
         "retrieval_tag_hit_rate_at_k": round(mean(item["retrieval_tag_hit_at_k"] for item in report_results), 3),
         "mean_ranked_tag_precision_at_n": round(mean(item["ranked_tag_precision_at_n"] for item in report_results), 3),
+        "mean_retrieval_tag_precision_at_n": round(mean(item["retrieval_tag_precision_at_n"] for item in report_results), 3),
+        # The reranker's contribution, and the only pair here that isolates it:
+        # identical candidates, identical cutoff, different order.
+        "mean_ranking_gain_at_n": round(mean(item["ranking_gain_at_n"] for item in report_results), 3),
         "ranking_fallback_rate": round(mean(item["ranking_fallback"] for item in report_results), 3),
         "total_fallback_slots": sum(item["fallback_count"] for item in report_results),
         "total_filled_slots": sum(item["filled_count"] for item in report_results),
@@ -345,6 +371,12 @@ def main() -> None:
         "dataset_size": dataset_size,
         "case_count": len(report_results),
         "mean_retrieval_tag_precision_at_k": summary["mean_retrieval_tag_precision_at_k"],
+        # Quoted as a pair on purpose. Read alone, precision@5 looks like a
+        # verdict on the retriever; beside precision@5 for the retriever's own
+        # ordering, it shows how much of it the reranker is responsible for.
+        "mean_retrieval_tag_precision_at_n": summary["mean_retrieval_tag_precision_at_n"],
+        "mean_ranked_tag_precision_at_n": summary["mean_ranked_tag_precision_at_n"],
+        "mean_ranking_gain_at_n": summary["mean_ranking_gain_at_n"],
         "mean_recall_of_ceiling_at_k": summary["mean_recall_of_ceiling_at_k"],
         "mean_recall_of_ceiling_at_n": summary["mean_recall_of_ceiling_at_n"],
         "mean_topic_overlap_at_k": summary["mean_topic_overlap_at_k"],
@@ -370,10 +402,12 @@ def main() -> None:
         "cases": report_results,
         "summary": summary,
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    # Named after the dataset, and only after the count is known.
+    output = args.output or REPORTS_DIR / f"evaluation-{dataset_size}.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report["headline"], indent=2))
-    print(f"\nFull per-case report written to {args.output}")
+    print(f"\nFull per-case report written to {output}")
 
 
 if __name__ == "__main__":

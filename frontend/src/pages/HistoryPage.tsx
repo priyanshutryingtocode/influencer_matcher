@@ -3,9 +3,10 @@ import { Link } from "react-router-dom";
 
 import { api, ApiError } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
-import { ErrorNote } from "../components/SystemNote";
+import { ErrorNote, NOTE_TITLES } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
+import { Skeleton } from "../components/Skeleton";
 import { RunContext } from "../components/RunContext";
 import { SummaryMetrics } from "../components/RunSummary";
 import { WarningBanner } from "../components/WarningBanner";
@@ -71,9 +72,9 @@ export function HistoryPage() {
         )}
       />
 
-      {(error || detail.error) && <ErrorNote title="Archive issue">{error ?? detail.error}</ErrorNote>}
-      {exportError && <ErrorNote title="Export issue">{exportError}</ErrorNote>}
-      {isLoading && <LoadingLedger />}
+      {(error || detail.error) && <ErrorNote title={NOTE_TITLES.archive}>{error ?? detail.error}</ErrorNote>}
+      {exportError && <ErrorNote title={NOTE_TITLES.export}>{exportError}</ErrorNote>}
+      {isLoading && <Skeleton variant="ledger" />}
 
       <div className="history-layout">
         <aside className="history-ledger">
@@ -132,8 +133,4 @@ export function HistoryPage() {
       </div>
     </section>
   );
-}
-
-function LoadingLedger() {
-  return <div className="skeleton-ledger"><span /><span /><span /></div>;
 }

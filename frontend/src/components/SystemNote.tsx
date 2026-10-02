@@ -33,3 +33,20 @@ export function ErrorNote({ title, children, action }: Omit<SystemNoteProps, "to
 export function InfoNote({ title, children }: Omit<SystemNoteProps, "tone" | "action">) {
   return <SystemNote tone="info" title={title}>{children}</SystemNote>;
 }
+
+/** The recurring failure titles, written once.
+ *
+ *  "Export issue" and "Archive issue" were each typed at two call sites in two
+ *  different files, so the same failure could read differently on two pages --
+ *  the kind of drift that only shows up when you happen to be looking at both.
+ *  A one-off title is still passed directly; this covers the recurring kinds.
+ */
+export const NOTE_TITLES = {
+  connection: "Connection issue",
+  request: "Request issue",
+  archive: "Archive issue",
+  export: "Export issue",
+  comparison: "Comparison issue",
+  authConfig: "Auth not configured",
+  crashed: "Something broke on this page",
+} as const;

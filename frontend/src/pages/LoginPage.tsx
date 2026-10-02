@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 
-import { ErrorNote } from "../components/SystemNote";
+import { ErrorNote, NOTE_TITLES } from "../components/SystemNote";
 import { useAuth } from "../auth/AuthProvider";
 
 type AuthMode = "signin" | "signup";
@@ -78,7 +78,7 @@ export function LoginPage() {
           {mode === "signin" ? "Use the email and password for your account." : "Your account and run history are unique per user ID."}
         </p>
         {!isConfigured ? (
-          <ErrorNote title="Auth not configured">
+          <ErrorNote title={NOTE_TITLES.authConfig}>
             Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in the frontend environment.
           </ErrorNote>
         ) : (

@@ -61,6 +61,39 @@ def bank(cache: EmbeddingCache, influencers, count: int) -> None:
     ])
 
 
+def test_limit_with_index_only_never_writes(tmp_path, monkeypatch, capsys):
+    """`--limit N --index-only` must not replace the live index.
+
+    `--limit` is documented as writing nothing, but the guard used to read
+    `bool(args.limit) and not args.index_only`, so passing `--index-only`
+    alongside it flipped the guard to False and the run proceeded to
+    replace_influencers() -- TRUNCATE plus insert N rows. On a shared database
+    that is `--limit 5 --index-only` silently destroying an indexed corpus.
+
+    The `no_database` fixture raises on any connection attempt, so reaching the
+    write at all fails this test.
+    """
+    args = make_args(tmp_path, limit=3, index_only=True)
+    monkeypatch.setattr(main, "index_influencers", lambda profiles, cache=None: None)
+
+    main.ensure_indexed(args)
+    captured = capsys.readouterr()
+
+    assert "Ignoring --index-only" in captured.out
+    assert "never writes" in captured.out
+
+
+def test_limit_alone_still_reports_the_smoke_test(tmp_path, monkeypatch, capsys):
+    args = make_args(tmp_path, limit=3, index_only=False)
+    monkeypatch.setattr(main, "index_influencers", lambda profiles, cache=None: None)
+
+    main.ensure_indexed(args)
+    captured = capsys.readouterr()
+
+    assert "Ignoring --index-only" not in captured.out
+    assert "database was left untouched" in captured.out
+
+
 def test_preflight_reports_reuse_and_remaining_requests(tmp_path, monkeypatch, capsys):
     args = make_args(tmp_path)
     influencers = generate_influencers(count=args.count)

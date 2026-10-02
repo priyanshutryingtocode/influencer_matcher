@@ -1,0 +1,91 @@
+/* Design tokens: colour, type, spacing, motion, elevation. Nothing here may
+   depend on a selector. */
+
+:root {
+  font-family: var(--font-sans);
+  color: #eef1e9;
+  background: #0c0e10;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --canvas: #0c0e10;
+  --surface: #131619;
+  --surface-raised: #1a1f22;
+  --surface-soft: #101315;
+  --rule: #2a3134;
+  --rule-strong: #414b4e;
+  --text: #eef1e9;
+  --muted: #8d9799;
+  --muted-strong: #b4bdbc;
+  --signal: #c8f36b;
+  --signal-dim: #8da94b;
+  --info: #9dbcf0;
+  --warning: #e4b86c;
+  --danger: #ef8175;
+  --content-width: 1360px;
+  --page-gutter: max(1.5rem, calc((100vw - var(--content-width)) / 2));
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-pill: 999px;
+
+/* Type scale: a constant 1.125 ratio anchored on a 16px base, so each step is
+   a perceptible jump. The old steps ran 11.36 -> 11.84px between --text-2xs and
+   --text-xs -- a 4% gap, invisible -- so the smallest labels could not be told
+   apart from the values beside them and dense pages read as flat. */
+  --text-2xs: .7rem;    /* 11.20px */
+  --text-xs: .79rem;    /* 12.64px */
+  --text-sm: .89rem;    /* 14.24px */
+  --text-base: 1rem;    /* 16.00px */
+  --text-lg: 1.125rem;  /* 18.00px */
+  --text-xl: 1.27rem;   /* 20.32px */
+  --text-display: clamp(1.6rem, 3.2vw, 2.5rem);
+
+  /* Spacing scale, 4px grid. Every value below used to be a one-off: 32
+     distinct rem values across 175 declarations, including .28, .62 and .78rem
+     that exist nowhere else. Declared in rem, not px, so spacing still tracks
+     the reader's root font size. The comment gives the px at a 16px root. */
+  --space-1: .25rem;   /* 4px  */
+  --space-2: .5rem;    /* 8px  */
+  --space-3: .75rem;   /* 12px */
+  --space-4: 1rem;     /* 16px */
+  --space-5: 1.25rem;  /* 20px */
+  --space-6: 1.5rem;   /* 24px */
+  --space-7: 2rem;     /* 32px */
+  --space-8: 2.5rem;   /* 40px */
+  --space-9: 3rem;     /* 48px */
+  --space-10: 4rem;    /* 64px */
+  --space-11: 5rem;    /* 80px */
+
+  /* Two families: the reader's UI sans for text, and a mono for every figure.
+     Numerals stay mono because the summary strip, the result metrics and the
+     rank column all rely on tabular figures lining up. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* Motion. The file had exactly one transition declaration and three
+     keyframes, so nothing shared a duration or an easing curve. */
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 200ms;
+  --motion-duration-slow: 320ms;
+  --motion-ease: cubic-bezier(.2, .7, .3, 1);
+  --motion-ease-out: cubic-bezier(0, 0, .2, 1);
+
+  /* Elevation. Four unrelated one-off shadows become three levels. */
+  --shadow-1: inset 0 1px var(--hairline);
+  --shadow-2: 0 1px 0 var(--hairline);
+  --shadow-3: 0 18px 45px var(--shadow-pop);
+
+  /* Signal/danger tints, so the same hue is never re-typed as a raw rgb(). */
+  --signal-soft: rgb(200 243 107 / 4%);
+  --signal-line: rgb(200 243 107 / 34%);
+  --signal-glow: rgb(200 243 107 / 10%);
+  /* Focus ring. At 35% this measured 2.73:1 against --surface, under the 3:1
+     that WCAG 1.4.11 asks of a focus indicator. The focus border was carrying it
+     at 15:1, but the ring should stand on its own -- 70% is 7.4-8.1:1 and still
+     reads as a glow rather than a second border. */
+  --signal-focus: rgb(200 243 107 / 70%);
+  --signal-hover: #d9ff8e;
+  --danger-soft: rgb(239 129 117 / 40%);
+  --topbar-veil: rgb(12 14 16 / 88%);
+  --shadow-pop: 0 18px 45px rgb(0 0 0 / 42%);
+  --hairline: rgb(255 255 255 / 3%);
+}

@@ -90,6 +90,12 @@ export function ResultCard({ creator, entry, brief, highlight = false }: ResultC
             <span className="visually-hidden">{`Cosine similarity to your brief: ${similarity}`}</span>
           </span>
         </span>
+        {/* No magnitude bar, and that is measured rather than forgotten:
+           * distinct creators sit at 0.783-0.876 cosine (top-50 neighbours of 20
+           * sampled queries), so a 0-100% bar leaves 9 points of width across a
+           * shortlist, and rescaling it would report a real 0.78 as 20%. The fix
+           * is mean-centring the embeddings -- a backend change needing the index
+           * re-validated. The reach bar below keeps 0-100%: it is a proportion. */}
         {entry.source !== "llm" && <span className="source-label">{fallbackSourceLabels[entry.source]}</span>}
         {/* The server persists why a row fell back -- a metered daily ranking
          * cap needs different advice from a truncated response -- and that
@@ -99,8 +105,24 @@ export function ResultCard({ creator, entry, brief, highlight = false }: ResultC
         )}
       </div>
       <div className="result-metrics">
-        <Metric label="Reach" value={formatFollowers(creator.followers)} />
+        <Metric label="Followers" value={formatFollowers(creator.followers)} />
         <Metric label="Engagement" value={`${creator.engagement_pct.toFixed(1)}%`} />
+        {/* Reach as a share of followers separates real reach from a large
+         * follower count, which is the number a brand is most often misled by.
+         * It was buried under "Profile details" -- the one check the row
+         * actually exists to answer, hidden behind a click. Spans both columns
+         * so the two existing metrics keep their place in the grid. */}
+        {creator.reach_ratio > 0 && (
+          <div className="result-metric result-metric-wide">
+            <span>Reach rate</span>
+            <span className="micro-bar" aria-hidden="true">
+              <span className="micro-bar-fill" style={{ inlineSize: `${Math.min(creator.reach_ratio, 1) * 100}%` }} />
+            </span>
+            <strong>
+              {Math.round(creator.reach_ratio * 100)}%<span className="visually-hidden"> of followers</span>
+            </strong>
+          </div>
+        )}
       </div>
       <div className="result-rationale">
         {entry.rationale && <p>{entry.rationale}</p>}
@@ -136,11 +158,8 @@ function detailPairs(creator: CreatorSnapshot): string[] {
   if (creator.language) pairs.push(`Language: ${creator.language}`);
   if (creator.audience_age) pairs.push(`Audience: ${creator.audience_age}`);
   if (creator.audience_gender) pairs.push(`Gender: ${creator.audience_gender}`);
-  // Reach as a share of followers is what separates real reach from a large
-  // follower count, which is the number a brand is most often misled by.
-  if (creator.reach_ratio > 0) {
-    pairs.push(`Reach vs followers: ${(creator.reach_ratio * 100).toFixed(0)}%`);
-  }
+  // Reach as a share of followers is now a visible bar in the metrics block, so
+  // it must not be repeated here.
   if (creator.sponsored_ratio > 0) {
     pairs.push(`Sponsored: ${(creator.sponsored_ratio * 100).toFixed(0)}%`);
   }

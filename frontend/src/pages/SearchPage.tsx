@@ -3,15 +3,19 @@ import type { FormEvent } from "react";
 
 import { api, ApiError } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
-import { ErrorNote } from "../components/SystemNote";
+import { EmptyWorkspace } from "../components/EmptyWorkspace";
+import { ErrorNote, NOTE_TITLES } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
+import { RangeControl } from "../components/RangeControl";
 import { ResultList } from "../components/ResultList";
 import { RunContext } from "../components/RunContext";
+import { RunStatus } from "../components/RunStatus";
 import { SummaryMetrics } from "../components/RunSummary";
 import { WarningBanner } from "../components/WarningBanner";
 import { useMatchJob } from "../hooks/useMatchJob";
+import { Skeleton } from "../components/Skeleton";
 import { useResource } from "../hooks/useResource";
-import type { Brief, MatchJob, Meta, RunDetail } from "../types";
+import type { Brief, Meta, RunDetail } from "../types";
 
 const emptyBrief: Brief = {
   goal: "",
@@ -29,13 +33,6 @@ const goalSuggestions = [
   "budget-friendly travel planning for solo backpackers",
   "skincare routines for sensitive skin, taught inclusively",
   "data-driven investing basics for first-time buyers",
-];
-
-const pipelineStages = [
-  { key: "embedding", label: "Prepare" },
-  { key: "retrieval", label: "Retrieve" },
-  { key: "ranking", label: "Rank" },
-  { key: "persisting", label: "Save" },
 ];
 
 /** Used only when the deployed API is an older build that does not publish
@@ -158,13 +155,13 @@ export function SearchPage() {
 
       {meta.error && (
         <ErrorNote
-          title="Connection issue"
+          title={NOTE_TITLES.connection}
           action={<button className="btn btn-ghost" type="button" onClick={meta.retry}>Retry</button>}
         >
           {meta.error}
         </ErrorNote>
       )}
-      {!metaValue && !meta.error && <LoadingForm />}
+      {!metaValue && !meta.error && <Skeleton variant="form" />}
 
       {metaValue && (
         <div className="match-workspace">
@@ -240,7 +237,7 @@ export function SearchPage() {
             {job && <RunStatus job={job} isRunning={isRunning} />}
             {(error || run.error) && (
               <ErrorNote
-                title="Request issue"
+                title={NOTE_TITLES.request}
                 action={run.error
                   ? <button className="btn btn-ghost" type="button" onClick={run.retry}>Retry</button>
                   : undefined}
@@ -249,7 +246,7 @@ export function SearchPage() {
               </ErrorNote>
             )}
             {exportError && (
-              <ErrorNote title="Export issue">
+              <ErrorNote title={NOTE_TITLES.export}>
                 {exportError}
               </ErrorNote>
             )}
@@ -264,7 +261,7 @@ export function SearchPage() {
                 body="No creators came back for this filter. Switch to Any or adjust the brief."
               />
             )}
-            {awaitingRun && <LoadingResults />}
+            {awaitingRun && <Skeleton variant="results" label="Loading your shortlist" />}
             {runDetail && (
               <div className="run-results">
                 <RunContext
@@ -290,149 +287,4 @@ export function SearchPage() {
       )}
     </section>
   );
-}
-
-function RangeControl({
-  id,
-  label,
-  value,
-  min,
-  max,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (value: number) => void;
-}) {
-  const labelId = `${id}-label`;
-  return (
-    <label className="range-control" htmlFor={id}>
-      {/* The caption and the live value share a flex row, so wrapping both in
-       * the <label> made the input's accessible name "Candidates retrieved10" and
-       * changed it while dragging. Name from the caption, spell the value out in
-       * aria-valuetext. */}
-      <span><span id={labelId}>{label}</span><strong>{value}</strong></span>
-      <input
-        id={id}
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        aria-labelledby={labelId}
-        aria-valuetext={`${value} creators`}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </label>
-  );
-}
-
-function RunStatus({ job, isRunning }: { job: MatchJob; isRunning: boolean }) {
-  const isTerminal = job.status === "succeeded" || job.status === "failed" || job.status === "cancelled";
-  const activeIndex = activeStepIndex(job.stage, isTerminal);
-  /* The live region covers only the heading line. It used to wrap the whole
-   * block including the four pipeline steps, which re-render on every 1.2s poll
-   * -- a screen reader was re-announcing the entire pipeline roughly 50 times a
-   * run. The steps are static once a stage settles, so only the changing line
-   * is live. */
-  return (
-    <div className={`run-status run-status-${job.status}`}>
-      <div className="run-status-heading">
-        <div>
-          <p className="eyebrow">{job.status === "succeeded" ? "Completed run" : isTerminal ? "Run status" : "Live run"}</p>
-          {/* No aria-busy here. On a live region it tells AT to hold back the
-            * update, which is the opposite of the intent: the stage label is
-            * the one line that should be announced as it changes. */}
-          <h2 aria-live="polite">{stageLabel(job.stage)}</h2>
-        </div>
-        <span className="status-text">{isRunning ? "In progress" : job.status === "succeeded" ? "Complete" : job.status}</span>
-      </div>
-      <ol className="pipeline">
-        {pipelineStages.map((stage, index) => {
-          const state = stepState(index, activeIndex, isTerminal, job.status === "succeeded");
-          return (
-            <li className={`pipeline-step pipeline-step-${state}`} aria-current={state === "active" ? "step" : undefined} key={stage.key}>
-              <span className="pipeline-index">{String(index + 1).padStart(2, "0")}</span>
-              <span>{stage.label}</span>
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}
-
-/** Which pipeline step is current, or the last one for a terminal failure.
- *
- *  The API creates every job as `queued` and only advances to `embedding` once a
- *  worker picks it up, so on a free tier that gap is where every user's first
- *  poll lands -- often tens of seconds, while the instance wakes.
- *
- *  This used to be `findIndex(stage => stage.key === job.stage)` inline, which
- *  returns -1 for anything not in the list -- `queued` on every single run, and
- *  any stage a newer backend introduces. The nested ternary that consumed it had
- *  no branch for a negative index, so the whole pipeline rendered `pending`:
- *  four grey bars under a heading that said "Waiting to start". */
-function activeStepIndex(stage: string, isTerminal: boolean): number {
-  if (isTerminal) return pipelineStages.length - 1;
-  const found = pipelineStages.findIndex((step) => step.key === stage);
-  if (found >= 0) return found;
-  /* A stage this build has never heard of. Returning `last` here would mark
-   * every earlier step complete, asserting work we have no evidence finished;
-   * 0 asserts only that we do not know yet. Either way the pipeline shows
-   * something happening rather than four grey bars. */
-  return 0;
-}
-
-function stepState(
-  index: number,
-  activeIndex: number,
-  isTerminal: boolean,
-  succeeded: boolean,
-): "complete" | "active" | "error" | "pending" {
-  if (succeeded || index < activeIndex) return "complete";
-  if (index > activeIndex) return "pending";
-  return isTerminal ? "error" : "active";
-}
-
-function EmptyWorkspace() {
-  return (
-    <EmptyState
-      index="READY"
-      title="Set a brief."
-      body="Retrieval, semantic matching, and ranking stay visible here while the run moves through each stage."
-      steps={pipelineStages.map((stage) => stage.label)}
-    />
-  );
-}
-
-function LoadingForm() {
-  return <div className="skeleton-workspace"><div className="skeleton-rail" /><div className="skeleton-results"><span /><span /><span /></div></div>;
-}
-
-/** Shown between "the job succeeded" and the shortlist arriving. Matches the
- *  existing skeleton treatment rather than inventing a second one. */
-function LoadingResults() {
-  return (
-    <div className="skeleton-results" aria-live="polite" aria-busy="true">
-      <span className="visually-hidden">Loading your shortlist</span>
-      <span /><span /><span />
-    </div>
-  );
-}
-
-function stageLabel(stage: string): string {
-  if (stage === "queued") return "Waiting to start";
-  if (stage === "embedding") return "Preparing the query";
-  if (stage === "retrieval") return "Retrieving candidates";
-  if (stage === "ranking") return "Ranking with Gemini";
-  if (stage === "persisting") return "Saving the shortlist";
-  if (stage === "complete") return "Match complete";
-  if (stage === "failed") return "Match failed";
-  if (stage === "cancelled") return "Run cancelled";
-  // A stage this build has never heard of used to be echoed raw into the
-  // heading; a backend can add one without this frontend knowing.
-  return "Working";
 }

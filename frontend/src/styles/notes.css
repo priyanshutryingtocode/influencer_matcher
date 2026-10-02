@@ -1,0 +1,16 @@
+/* System notes (info/error/warning) and their disclosures. */
+
+.system-note { display: grid; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--rule); border-left: 2px solid var(--info); border-radius: var(--radius); background: var(--surface); font-size: var(--text-sm); }
+.system-note-error { border-left-color: var(--danger); }
+.system-note-info { border-left-color: var(--info); }
+.system-note-heading { display: flex; align-items: center; gap: var(--space-2); color: var(--muted-strong); }
+.system-note-heading strong { color: var(--text); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em; }
+.system-note-rule { height: 1px; flex: 1; background: var(--rule); }
+.system-note-count { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-2xs); }
+.system-note-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.system-note-list li { display: flex; align-items: baseline; gap: var(--space-2); color: var(--muted-strong); }
+.note-label { min-width: 4.2rem; color: var(--warning); font-size: var(--text-2xs); font-weight: 750; text-transform: uppercase; }
+.system-note-error .note-label { color: var(--danger); }
+.note-actions { display: flex; gap: var(--space-2); }
+.note-details { display: inline-flex; align-items: baseline; gap: var(--space-1); color: var(--muted); font-size: var(--text-xs); }
+.note-details summary { cursor: pointer; color: var(--signal-dim); }

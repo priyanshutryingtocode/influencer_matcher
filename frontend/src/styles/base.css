@@ -1,0 +1,13 @@
+/* Element defaults. Layered below components so a component rule wins no
+   matter which file the competing rule lives in. */
+
+* { box-sizing: border-box; }
+html { background: var(--canvas); }
+/* Nothing set a leading, so all body copy inherited the browser default of
+   roughly 1.2 -- tight for anything that wraps. Headings set their own. */
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--canvas); color: var(--text); line-height: 1.5; }
+button, input, select, textarea { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+a { color: var(--signal); text-decoration: none; }
+a:hover { color: var(--signal-hover); }
+button { color: inherit; }

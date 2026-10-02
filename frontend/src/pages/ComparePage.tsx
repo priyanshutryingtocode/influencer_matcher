@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 
 import { api } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
-import { ErrorNote, InfoNote } from "../components/SystemNote";
+import { ErrorNote, InfoNote, NOTE_TITLES } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
 import { SummaryMetrics } from "../components/RunSummary";
@@ -69,7 +69,7 @@ export function ComparePage() {
     return (
       <section className="page-section">
         <ErrorNote
-          title="Archive issue"
+          title={NOTE_TITLES.archive}
           action={<button className="btn btn-ghost" type="button" onClick={list.retry}>Retry</button>}
         >
           {list.error}
@@ -98,7 +98,7 @@ export function ComparePage() {
       />
       {compare.error && (
         <ErrorNote
-          title="Comparison issue"
+          title={NOTE_TITLES.comparison}
           action={<button className="btn btn-ghost" type="button" onClick={compare.retry}>Retry</button>}
         >
           {compare.error}

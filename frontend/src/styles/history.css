@@ -1,0 +1,22 @@
+/* History: run ledger and detail pane. */
+
+.history-layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: var(--space-9); align-items: start; }
+.history-ledger { min-width: 0; }
+.history-list { display: grid; gap: 1px; border-top: 1px solid var(--rule); }
+.history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--rule); }
+.history-row-active { border-left: 2px solid var(--signal); padding-left: var(--space-4); background: var(--signal-soft); }
+.history-open { display: grid; gap: var(--space-2); min-width: 0; padding: var(--space-4) var(--space-4) var(--space-4) 0; border: 0; color: var(--text); text-align: left; background: transparent; cursor: pointer; }
+.history-open:hover { background: var(--surface-soft); }
+.history-date { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-2xs); }
+.history-open strong { overflow-wrap: anywhere; font-size: var(--text-xs); }
+.history-open strong span { color: var(--signal-dim); }
+.history-meta { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-2xs); }
+.history-meta i { width: 3px; height: 3px; border-radius: 50%; background: var(--rule-strong); }
+.history-meta b { margin-left: var(--space-2); color: var(--warning); font-size: var(--text-2xs); font-weight: 700; text-transform: uppercase; }
+.delete-button { align-self: center; margin: var(--space-2); font-size: var(--text-2xs); }
+.empty-ledger { display: grid; gap: var(--space-2); border-bottom: 1px solid var(--rule); }
+.empty-ledger p { margin: 0; }
+.empty-ledger a { font-size: var(--text-xs); }
+.empty-ledger { padding: var(--space-4) 0; color: var(--muted); }
+.history-detail { min-width: 0; }
+.btn.full-width { width: 100%; margin-top: var(--space-4); justify-content: flex-start; }

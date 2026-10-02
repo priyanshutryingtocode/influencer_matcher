@@ -36,16 +36,10 @@ def _clear_rank_cache() -> None:
 
 VALID_FIT_LEVELS = {"strong", "partial", "weak"}
 
-# The only fields a reason may be grounded in, mapped to how to read them off
-# an Influencer. A citation naming anything else is dropped, so the model cannot
-# invent a field or point at one the client never sees.
-#
-# Every field here appears in `Influencer.corpus_text`, which is what makes the
-# citation meaningful: the model can only be right about a creator in a way
-# retrieval could have found, and a reader can check the claim against the same
-# text the vector was built from. Reach figures (followers, engagement rate) are
-# deliberately excluded - they cannot support a topical claim, and embedding
-# them would only blur the topical vector.
+# The only fields a reason may be grounded in. A citation naming anything else
+# is dropped. Every one appears in `Influencer.corpus_text`, so a reader can
+# check a claim against the text the vector was built from; reach figures are
+# excluded because they cannot support a topical claim.
 GROUNDABLE_FIELDS = {
     "tags": lambda c: c.tags,
     "bio": lambda c: c.bio,
@@ -57,17 +51,10 @@ GROUNDABLE_FIELDS = {
     "platform": lambda c: [c.platform],
 }
 
-# The length bounds below are load-bearing, not decoration.
-#
-# `max_output_tokens` caps the response, and a response cut off mid-string is
-# unparseable -- it fails as `JSONDecodeError: Unterminated string` and the
-# whole ranking degrades to retrieval order, burning one of only 20 daily
-# free-tier ranking calls. Adding `grounding` without bounding it took the
-# worst case from ~199 to ~1069 tokens against a 512 cap.
-#
-# Three citations amply support a one-sentence rationale, and a quote should be
-# a field value or a short span rather than a paragraph, so bounding the array
-# and the strings costs nothing the reason actually needed.
+# Load-bearing, not decoration: a response cut off mid-string is unparseable,
+# which degrades the whole ranking to retrieval order and burns one of only 20
+# daily free-tier calls. Unbounded grounding cost ~1069 tokens against a 512 cap;
+# three short citations support a one-sentence rationale without loss.
 MAX_GROUNDING_PER_ENTRY = 3
 MAX_QUOTE_LENGTH = 80
 MAX_RATIONALE_LENGTH = 240

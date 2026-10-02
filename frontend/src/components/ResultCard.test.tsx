@@ -127,10 +127,20 @@ describe("ResultCard", () => {
   it("shows reach, sponsorship and growth in the details panel", () => {
     const { container } = render(<ResultCard creator={creator} entry={entry} brief={brief} />);
 
-    // Reach as a share of followers is the check a brand actually wants.
-    expect(container.textContent).toContain("Reach vs followers: 62%");
     expect(container.textContent).toContain("Sponsored: 8%");
     expect(container.textContent).toContain("Growth: rising");
+  });
+
+  /* Reach as a share of followers used to live only under "Profile details" --
+   * the one check the row exists to answer, behind a click. */
+  it("surfaces reach rate without opening anything", () => {
+    const { container } = render(<ResultCard creator={creator} entry={entry} brief={brief} />);
+
+    expect(screen.getByText("Reach rate")).toBeTruthy();
+    expect(container.textContent).toContain("62%");
+    expect(container.textContent).toContain("of followers");
+    // No longer duplicated in the disclosure.
+    expect(container.textContent).not.toContain("Reach vs followers");
   });
 
   it("omits signals that are absent rather than showing zero", () => {
@@ -142,7 +152,7 @@ describe("ResultCard", () => {
       />,
     );
 
-    expect(container.textContent).not.toContain("Reach vs followers");
+    expect(screen.queryByText("Reach rate")).toBeNull();
     expect(container.textContent).not.toContain("Sponsored");
     expect(container.textContent).not.toContain("Growth:");
   });
@@ -152,8 +162,7 @@ describe("ResultCard", () => {
 
     expect(screen.getByText("—")).toBeTruthy();
   });
-
-  /* The reason reached this component and was dropped. The backend persists it
+   /* The reason reached this component and was dropped. The backend persists it
    * precisely because a spent daily quota and a truncated response call for
    * different advice from the reader. */
   it("shows why a row fell back, without the machine-readable tag", () => {
