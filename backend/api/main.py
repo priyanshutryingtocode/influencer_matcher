@@ -170,8 +170,6 @@ def create_app(
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
         logger.error("Unhandled API error: %s", type(exc).__name__)
-        # CORSMiddleware already adds the allow-origin header on the way out for
-        # permitted origins, so this response needs nothing extra.
         return JSONResponse(
             status_code=500,
             content={
@@ -206,13 +204,23 @@ def create_app(
         return {
             "platforms": ["Any", *PLATFORMS],
             "defaults": {
-                # Empty, not a sample brief: the Search page offers starter
+                # Empty, not sample briefs. The Search page offers starter
                 # prompts, and pre-filling would make it ambiguous whether the
-                # user actually typed it. The key has to exist even when empty,
-                # because the frontend reads it on every meta load.
+                # user actually typed it. Every key has to exist even when its
+                # value is empty, because the frontend reads it on each meta load.
+                #
+                # For the two optional fields this is also load-bearing rather
+                # than cosmetic: Brief.query_text() folds a non-empty audience or
+                # vibe into the embedded query, so the old "Gen Z" / "warm,
+                # friendly" here silently prepended themselves to every run's
+                # ranking. All 10 cases in evaluation_cases.json already leave
+                # these blank, so the reported hit rate and precision were
+                # measured goal-only and the form diverged from the config it
+                # reports on. Do not restore example values here -- put them in
+                # the frontend's suggestion chips.
                 "goal": "",
-                "audience": "Gen Z",
-                "vibe": "warm, friendly",
+                "audience": "",
+                "vibe": "",
                 "top_k": config.DEFAULT_TOP_K_RETRIEVAL,
                 "top_n": config.DEFAULT_TOP_N_RANKED,
             },

@@ -73,13 +73,6 @@ describe("BackendProvider", () => {
     expect(screen.getByTestId("error").textContent).toBe("The backend could not be reached.");
   });
 
-  /* The regression these two guard.
-   *
-   * `recheck` used to set the state back to "idle", and ProtectedRoute replaced
-   * the whole routed app with the "backend resting" panel whenever the state
-   * was not "online". So clicking Recheck in the top bar -- and a 15-minute
-   * timer that did the same thing on its own -- unmounted the page, discarding
-   * a half-typed brief, an in-flight poll, and the selected history run. */
   it("stays entered once online, so a later recheck never re-gates", async () => {
     apiMocks.probeBackend.mockResolvedValue(undefined);
     render(
@@ -145,7 +138,11 @@ describe("BackendGate", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Backend resting" })).toBeTruthy();
-    expect(screen.getByText(/free service that sleeps when idle/)).toBeTruthy();
+    // Matched loosely on the one phrase that carries the meaning. This was
+    // pinned to "free service that sleeps when idle" and broke the moment the
+    // copy was rewritten to name Render instead, which says nothing about
+    // whether the gate is explaining itself correctly.
+    expect(screen.getByText(/sleeps when idle/)).toBeTruthy();
     expect(apiMocks.probeBackend).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Start backend" }));

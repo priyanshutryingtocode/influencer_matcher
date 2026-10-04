@@ -13,9 +13,6 @@ export function ProtectedRoute() {
   if (import.meta.env.PROD && !isConfigured) return <div className="auth-loading">Supabase Auth is not configured.</div>;
   if (!isConfigured) return <Outlet />;
   if (!session) return <Navigate to="/login" replace />;
-  // Gate the very first visit only. After that the routed app stays mounted even
-  // if the host goes to sleep, so a wake never costs the user their page; the
-  // pill reports the state and each request fails on its own with a message.
   if (!entered && status !== "online") return <BackendGate />;
   return <Outlet />;
 }

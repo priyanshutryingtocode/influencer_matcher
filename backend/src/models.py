@@ -31,7 +31,6 @@ class CreatorSignals:
     # views / followers. The honest measure of whether reach is real: a
     # follower count can be large while actual reach stays small.
     reach_ratio: float = 0.0
-    # Share of posts that are paid, 0..1.
     sponsored_ratio: float = 0.0
     growth_trend: str = ""
     audience_top_countries: list[str] = field(default_factory=list)
@@ -58,7 +57,6 @@ class Influencer:
     verified: bool = False
     posts_per_week: int = 0
     account_age_years: int = 0
-    # Populated from the creator_signals row on read; see CreatorSignals.
     content_style: str = ""
     audience_age: str = ""
     audience_gender: str = ""

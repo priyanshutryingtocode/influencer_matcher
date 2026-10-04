@@ -151,6 +151,13 @@ def test_api_health_meta_and_match_job():
         # The key has to be present even though it is empty. When it was
         # omitted, the Search page read undefined and called .trim() on it.
         assert meta.json()["defaults"]["goal"] == ""
+        # Same contract for the two optional fields, and this one is load-bearing
+        # rather than cosmetic: Brief.query_text() folds a non-empty audience or
+        # vibe into the embedded query, so an example value restored here would
+        # silently prepend itself to every run's ranking. Example briefs belong in
+        # the frontend's suggestion chips, not in the defaults the form loads.
+        assert meta.json()["defaults"]["audience"] == ""
+        assert meta.json()["defaults"]["vibe"] == ""
         response = client.post(
             "/api/v1/match-jobs",
             json={

@@ -2,8 +2,10 @@
 /* A finished run: context header, summary strip, result rows. */
 
 .run-results { display: grid; gap: 0; }
-.run-context { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .run-context { align-items: flex-end; padding: var(--space-4) 0 var(--space-5); }
+/* The goal's <div> is a flex item, so it takes its min-content width by default
+   and the nowrap Export button gets shoved off the viewport instead. */
+.run-context > div { min-width: 0; }
 .run-context + .system-note { margin-bottom: var(--space-5); }
 .summary-strip + .result-list { border-top: 0; }
 .run-context h2 { margin: 0; color: var(--text); font-size: var(--text-xl); font-weight: 650; letter-spacing: -.025em; }

@@ -88,9 +88,7 @@ def parse_args() -> argparse.Namespace:
         parser.error("top-k and top-n must be positive, and top-n cannot exceed top-k")
     if args.rate_limit_per_min <= 0:
         parser.error("--rate-limit-per-min must be positive")
-    # The runner already paces itself by rate-limit windows, and one window is
-    # far below the embedding free-tier cap. Leaving the per-request floor in
-    # place would serialize the window and inflate the reported embed latency.
+
     config.EMBED_REQUEST_INTERVAL_SECONDS = 0.0
     return args
 
@@ -199,14 +197,7 @@ def _run_case(client, case: dict, top_k: int, top_n: int, query_cache=None) -> d
     ranked_candidates = [candidate_by_id[item["id"]] for item in ranked]
     retrieved_correct = sum(1 for c in candidates if expected_tags & set(c.tags))
     ranked_correct = sum(1 for c in ranked_candidates if expected_tags & set(c.tags))
-    # The pool is the only database work this case does, and it happens after
-    # ranking. It used to run against a connection checked out at the top of the
-    # case, which meant holding a pool slot across the embedding round trip, the
-    # vector search and the ranking call. A window fires len(window) cases at
-    # once -- 10 by default -- against a pool with max_size=4, so most threads
-    # spent the case blocked on the pool while holding nothing. Taking the
-    # connection here instead makes the database a short, uncontended step at
-    # the end, and lets concurrency follow the rate limit rather than max_size.
+
     with vector_store.get_connection() as conn:
         pool = pool_for(conn, expected_tags, brief.platform)
     result = {
@@ -227,14 +218,8 @@ def _run_case(client, case: dict, top_k: int, top_n: int, query_cache=None) -> d
         ) if candidates else 0.0,
         "ranked_tag_precision_at_n": round(tag_precision(ranked_candidates, expected_tags), 3),
             # The retriever's own ordering, scored at the *same* cutoff the
-            # ranked list is scored at. Without this the only retrieval number
-            # is precision@k while the only ranking number is precision@n, so
-            # the two get compared across different cutoffs and the difference
-            # gets read as a ranking win. Both are computed from the candidate
-            # list already in hand, so this costs nothing.
+            # ranked list is scored at.
             "retrieval_tag_precision_at_n": round(tag_precision(candidates[:top_n], expected_tags), 3),
-            # What the reranker added over the retriever: same candidates, same
-            # cutoff, only the order differs.
             "ranking_gain_at_n": round(
                 tag_precision(ranked_candidates, expected_tags)
                 - tag_precision(candidates[:top_n], expected_tags),
@@ -294,9 +279,7 @@ def main() -> None:
                 print(f"Window {w + 1}/{len(windows)}: cases "
                       f"{window[0] + 1}-{window[-1] + 1} firing concurrently...")
             with ThreadPoolExecutor(max_workers=len(window)) as pool:
-                # No connection is passed in: each case takes one for its own
-                # pool_for query at the end, rather than holding a pool slot for
-                # the whole case. See the note in _run_case.
+  
                 futures = {}
                 for idx in window:
                     futures[idx] = pool.submit(
@@ -344,10 +327,7 @@ def main() -> None:
     }
     hard = [item for item in report_results if item["hard"]]
     if hard:
-        # Reported per case, not as a mean. These briefs avoid their own case's
-        # tags, so they are the only evidence that the embedding carries meaning
-        # rather than words -- but three briefs cannot support an average, and a
-        # mean over them reads as a statistic when it is three anecdotes.
+        # Reported per case, not as a mean. 
         summary["hard_cases"] = {
             "case_count": len(hard),
             "note": (
@@ -364,16 +344,10 @@ def main() -> None:
             ],
         }
 
-    # The figures worth quoting, in one place. The `summary` above keeps every
-    # field for debugging and regression work; most of it is operational detail
-    # that means nothing to a reader.
     headline = {
         "dataset_size": dataset_size,
         "case_count": len(report_results),
         "mean_retrieval_tag_precision_at_k": summary["mean_retrieval_tag_precision_at_k"],
-        # Quoted as a pair on purpose. Read alone, precision@5 looks like a
-        # verdict on the retriever; beside precision@5 for the retriever's own
-        # ordering, it shows how much of it the reranker is responsible for.
         "mean_retrieval_tag_precision_at_n": summary["mean_retrieval_tag_precision_at_n"],
         "mean_ranked_tag_precision_at_n": summary["mean_ranked_tag_precision_at_n"],
         "mean_ranking_gain_at_n": summary["mean_ranking_gain_at_n"],
@@ -390,8 +364,6 @@ def main() -> None:
         "dataset_size": dataset_size,
         "top_k": args.top_k,
         "top_n": args.top_n,
-        # Counters come from the disk layer only, so a repeat run reporting
-        # hits == case_count is the evidence that it cost no embedding quota.
         "query_cache": {
             "enabled": query_cache is not None,
             "path": str(query_cache.path) if query_cache is not None else None,
@@ -402,7 +374,7 @@ def main() -> None:
         "cases": report_results,
         "summary": summary,
     }
-    # Named after the dataset, and only after the count is known.
+
     output = args.output or REPORTS_DIR / f"evaluation-{dataset_size}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

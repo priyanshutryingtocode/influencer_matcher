@@ -24,21 +24,14 @@ const emptyBrief: Brief = {
   vibe: "",
 };
 
-// Starter prompts, not a closed taxonomy: they exist to show that briefs are
-// written in plain language and to save a first-time user from a blank box.
 const goalSuggestions = [
   "a thrifted-vintage clothing label for Gen Z who care about slow fashion",
-  "high-energy at-home strength training for busy millennials",
-  "sourdough baking tips for people starting out at home",
   "budget-friendly travel planning for solo backpackers",
   "skincare routines for sensitive skin, taught inclusively",
   "data-driven investing basics for first-time buyers",
 ];
 
-/** Used only when the deployed API is an older build that does not publish
- *  limits. Applied once, in `resolveLimits`, rather than as a `??` at each of
- *  the seven call sites that read them -- a scattered fallback is a limit the
- *  UI can silently disagree with the backend about. */
+
 const FALLBACK_LIMITS: Meta["limits"] = {
   goal_min_length: 20,
   goal_max_length: 1000,
@@ -60,14 +53,8 @@ export function SearchPage() {
   const [topK, setTopK] = useState(10);
   const [topN, setTopN] = useState(5);
   const [exporting, setExporting] = useState(false);
-  // An export failure used to be written into the run-fetch error slot, so the
-  // Retry button next to it refetched the run instead of retrying the download.
   const [exportError, setExportError] = useState<string | null>(null);
   const { job, error, isRunning, start } = useMatchJob();
-  /* True once the user has submitted anything, whatever the outcome. The
-   * workspace distinguishes "nothing here yet" from "your run failed" -- the
-   * hook nulls `job` on failure, so keying off `job` alone made the first-run
-   * empty state reappear over the error. */
   const [hasStarted, setHasStarted] = useState(false);
 
   const meta = useResource<Meta>(
@@ -77,10 +64,7 @@ export function SearchPage() {
       fallbackError: "Could not load API metadata.",
       onLoad: (value) => {
         setBrief((current) => ({
-          // Every read is defaulted. The deployed API can be an older build than
-          // this frontend -- a missing `defaults.goal` once threw
-          // "Cannot read properties of undefined" and blanked the page, so a
-          // skewed backend must degrade to an empty form, not a crash.
+
           goal: current.goal || value.defaults?.goal || "",
           platform: value.platforms.includes(current.platform) ? current.platform : value.platforms[0] ?? current.platform,
           audience: value.defaults?.audience ?? "",
@@ -96,10 +80,7 @@ export function SearchPage() {
     (signal) => api.getRun(job!.run_id!, { signal }),
     [job?.run_id],
     {
-      // The job reports success before the shortlist is readable. Fetching only
-      // once a run_id exists keeps the "run exists but the fetch failed" case
-      // retryable, which was the whole point: re-reading a record we already
-      // have must not mean spending embedding and ranking quota on a new match.
+      // The job reports success before the shortlist is readable. 
       enabled: job?.status === "succeeded" && Boolean(job.run_id) && job.outcome !== "no_results",
       fallbackError: "Could not load the completed run.",
     },
@@ -127,9 +108,6 @@ export function SearchPage() {
   const goal = brief.goal ?? "";
   const goalLength = goal.trim().length;
   const goalTooShort = goalLength > 0 && goalLength < limits.goal_min_length;
-  // The job reports success before its shortlist has been fetched. Without this
-  // the workspace rendered nothing at all in that window -- the empty state is
-  // for "no job yet" and the results are for "run loaded", so neither applied.
   const awaitingRun = job?.status === "succeeded"
     && !runDetail
     && (run.loading || !run.error)
@@ -178,10 +156,6 @@ export function SearchPage() {
                     placeholder="Describe the product or campaign in your own words."
                     onChange={(event) => updateBrief("goal", event.target.value)}
                     rows={5}
-                    /* The label element also wraps the live character counter, so
-                     * without this the field's accessible name was "What are you
-                     * promoting? 12/1000" and changed on every keystroke. Name it
-                     * from the caption, describe it with the count. */
                     aria-labelledby="goal-label"
                     aria-describedby="goal-count"
                   />
@@ -204,11 +178,11 @@ export function SearchPage() {
                 </label>
                 <label className="brief-field" htmlFor="audience">
                   <span>Target audience <em>optional</em></span>
-                  <input id="audience" value={brief.audience} maxLength={limits.audience_max_length} placeholder="e.g. first-time buyers" onChange={(event) => updateBrief("audience", event.target.value)} />
+                  <input id="audience" value={brief.audience} maxLength={limits.audience_max_length} placeholder="e.g. GenZ, first-time buyers" onChange={(event) => updateBrief("audience", event.target.value)} />
                 </label>
                 <label className="brief-field" htmlFor="vibe">
                   <span>Vibe or tone <em>optional</em></span>
-                  <textarea id="vibe" value={brief.vibe} maxLength={limits.vibe_max_length} placeholder="e.g. warm, practical, no-nonsense" onChange={(event) => updateBrief("vibe", event.target.value)} rows={2} />
+                  <textarea id="vibe" value={brief.vibe} maxLength={limits.vibe_max_length} placeholder="e.g. warm, practical" onChange={(event) => updateBrief("vibe", event.target.value)} rows={2} />
                 </label>
               </div>
               <div className="rail-divider" />

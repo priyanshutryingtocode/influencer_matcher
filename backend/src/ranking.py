@@ -36,10 +36,6 @@ def _clear_rank_cache() -> None:
 
 VALID_FIT_LEVELS = {"strong", "partial", "weak"}
 
-# The only fields a reason may be grounded in. A citation naming anything else
-# is dropped. Every one appears in `Influencer.corpus_text`, so a reader can
-# check a claim against the text the vector was built from; reach figures are
-# excluded because they cannot support a topical claim.
 GROUNDABLE_FIELDS = {
     "tags": lambda c: c.tags,
     "bio": lambda c: c.bio,
@@ -51,10 +47,6 @@ GROUNDABLE_FIELDS = {
     "platform": lambda c: [c.platform],
 }
 
-# Load-bearing, not decoration: a response cut off mid-string is unparseable,
-# which degrades the whole ranking to retrieval order and burns one of only 20
-# daily free-tier calls. Unbounded grounding cost ~1069 tokens against a 512 cap;
-# three short citations support a one-sentence rationale without loss.
 MAX_GROUNDING_PER_ENTRY = 3
 MAX_QUOTE_LENGTH = 80
 MAX_RATIONALE_LENGTH = 240
@@ -91,18 +83,12 @@ RANKING_SCHEMA = {
 }
 
 EXPECTED_RANKING_ERRORS = (errors.APIError, json.JSONDecodeError, KeyError, TypeError)
-
-# Prefix on `fallback_reason` when the cause is a spent daily quota rather than
-# an outage or a malformed response. A tag rather than a substring match on the
-# exception text: the reason is persisted on the run, so it has to stay
-# recognisable, and the two cases call for different advice from the user.
 QUOTA_REASON_TAG = "daily_quota"
 
 
 def _build_prompt(brief: Brief, candidates: list[Influencer], top_n: int) -> str:
     # Every field the model is allowed to cite is sent, because the reason the
-    # user reads has to rest on something they can check. Reach figures are
-    # excluded: they cost tokens and cannot support a topical claim.
+    # user reads has to rest on something they can check.
     candidate_payload = [
         {
             "id": c.id,
@@ -194,12 +180,8 @@ def _verify_entry(entry: dict, creator: Influencer, fit: str) -> dict:
             continue
         value = read(creator)
         if isinstance(value, list):
-            # A list field is a set of discrete facts, so a citation must name
-            # one of them exactly. Substring matching here would let a quote
-            # like "fit" pass against a tag "fitness".
             ok = quote in [str(item) for item in value]
         else:
-            # A scalar (bio, style) is prose, so a verbatim span is correct.
             ok = quote in str(value)
         if ok:
             seen_fields.add(field)
@@ -210,9 +192,7 @@ def _verify_entry(entry: dict, creator: Influencer, fit: str) -> dict:
         rationale = ""
 
     if not grounding:
-        # Nothing the model said could be checked. A strong claim in
-        # particular cannot survive this, and the reason is replaced rather
-        # than left standing on the UI as an unchecked assertion.
+        # Nothing the model said could be checked.
         return {
             "id": creator.id,
             "fit": "weak" if fit == "weak" else "partial",
@@ -320,9 +300,6 @@ def rank_candidates(
             _rank_cache.move_to_end(cache_key)
             return list(cached)
 
-    # Only reached on a cache miss, so this call is one of the 20 the free
-    # tier allows per day.
-
     valid_ids = {c.id for c in candidates}
 
     try:
@@ -333,21 +310,11 @@ def rank_candidates(
             gen_config=_gen_config(),
         )
     except DailyQuotaExhausted as e:
-        # Not an `APIError`, so the general handler below never sees it, and
-        # `gemini_client` raises it precisely so callers can degrade instead of
-        # failing: a spent daily cap cannot be retried, but retrieval-order
-        # results are still worth returning. The reason is tagged so the API can
-        # tell a quota cap from an outage, which need different advice.
+
         return _fallback_ranking(candidates, top_n, reason=f"{QUOTA_REASON_TAG}: {e}")
     except EXPECTED_RANKING_ERRORS as e:
         return _fallback_ranking(candidates, top_n, reason=f"{type(e).__name__}: {e}")
 
-    # Read the finish reason before parsing. A response stopped at the token
-    # cap is cut mid-string, so the parse fails with "Unterminated string" and
-    # nothing in that message says why. Naming the cause is the difference
-    # between a two-second diagnosis and a guess. No automatic retry: the
-    # schema bounds below are what prevent this, and a retry would spend a
-    # second of the 20 daily free-tier calls to fix what they already handle.
     truncated = _truncation_reason(response)
     if truncated:
         return _fallback_ranking(candidates, top_n, reason=truncated)

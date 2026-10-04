@@ -16,9 +16,6 @@ export function App() {
     <AuthProvider>
       <BackendProvider>
         <BrowserRouter>
-          {/* Inside the router so the boundary can stay mounted across route
-              changes: a boundary that remounts with the route would reset its
-              error state on every navigation and never recover. */}
           <ErrorBoundary>
             <Routes>
               <Route path="/login" element={<LoginPage />} />

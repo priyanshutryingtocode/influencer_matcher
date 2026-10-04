@@ -118,7 +118,6 @@ def build_warnings(ranked: list[dict]) -> list[dict]:
     return [warning.model_dump(mode="json") for warning in warnings]
 
 
-#: The six keys a stored summary must carry to be reused instead of recomputed.
 SUMMARY_KEYS = (
     "n_results",
     "avg_match_pct",

@@ -176,10 +176,6 @@ class EmbeddingCache:
         self.hits = 0
         self.misses = 0
         self._vectors: dict[str, list[float]] = {}
-        # The evaluator embeds cases concurrently, and one record is ~15 KB of
-        # JSON -- far too large for an append to be atomic. Concurrent writers
-        # would interleave mid-record and corrupt the file, so writes are
-        # serialised. Reads are plain dict lookups and need no lock.
         self._write_lock = threading.Lock()
         self._load()
 
@@ -217,8 +213,6 @@ class EmbeddingCache:
             self.misses += 1
             return None
         self.hits += 1
-        # Re-normalize on read so a hand-edited or older cache file still
-        # yields exact cosine distances.
         return _normalize(values)
 
     def put_many(self, entries: list[tuple[str, np.ndarray]]) -> None:

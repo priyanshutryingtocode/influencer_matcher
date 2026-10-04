@@ -5,7 +5,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorNote, InfoNote, NOTE_TITLES } from "../components/SystemNote";
 import { PageIntro } from "../components/PageIntro";
 import { ResultList } from "../components/ResultList";
-import { SummaryMetrics } from "../components/RunSummary";
+import { formatFollowers } from "../components/RunSummary";
 import { WarningBanner } from "../components/WarningBanner";
 import { useResource } from "../hooks/useResource";
 import { formatDate } from "../format";
@@ -119,8 +119,8 @@ export function ComparePage() {
           <ComparisonOverview comparison={comparison} />
           <OverlapList comparison={comparison} details={details} />
           <div className="compare-columns">
-            <CompareColumn title="Run A" detail={details.a} summary={comparison.summary_a} sharedKeys={sharedKeys} />
-            <CompareColumn title="Run B" detail={details.b} summary={comparison.summary_b} sharedKeys={sharedKeys} />
+            <CompareColumn title="Run A" detail={details.a} sharedKeys={sharedKeys} />
+            <CompareColumn title="Run B" detail={details.b} sharedKeys={sharedKeys} />
           </div>
         </>
       )}
@@ -141,57 +141,134 @@ function RunSelect({ label, value, runs, onChange }: { label: string; value: str
   );
 }
 
+/** How a metric reads on its own, and how a change between two of them reads.
+ *  Both are needed because the units differ: a difference of two percentages is
+ *  percentage points, and a difference of two follower counts is not a
+ *  percentage at all. The old single `suffix` produced "+5.7%" for engagement
+ *  and "+13873" for reach, which were both the wrong unit for a delta. */
+interface MetricFormat {
+  value: (n: number) => string;
+  delta: (difference: number) => string;
+}
+
+/** Three-way, because every delta below is rendered from an unsigned magnitude:
+ *  a sign helper that only ever added "+" turned a 14K reach decline into "14K",
+ *  which reads as a gain. */
+function sign(value: number): string {
+  return value > 0 ? "+" : value < 0 ? "-" : "";
+}
+
+const INTEGER: MetricFormat = {
+  value: (n) => String(n),
+  delta: (difference) => `${sign(difference)}${Math.abs(difference)}`,
+};
+
+const PERCENT: MetricFormat = {
+  value: (n) => `${n.toFixed(1)}%`,
+  delta: (difference) => `${sign(difference)}${Math.abs(difference).toFixed(1)}pp`,
+};
+
+const FOLLOWERS: MetricFormat = {
+  value: formatFollowers,
+  // formatFollowers drops the sign, so the magnitude has to be unsigned here and
+  // the sign reapplied outside it.
+  delta: (difference) => `${sign(difference)}${formatFollowers(Math.abs(difference))}`,
+};
+
 function ComparisonOverview({ comparison }: { comparison: Comparison }) {
+  const a = comparison.summary_a;
+  const b = comparison.summary_b;
   return (
     <div className="compare-overview">
       <div className="overview-primary"><span>Shared creators</span><strong>{comparison.shared_creators.length}</strong><small>appear in both shortlists</small></div>
-      <Delta label="Strong fits" valueA={comparison.summary_a.n_strong} valueB={comparison.summary_b.n_strong} />
-      <Delta label="Avg engagement" valueA={comparison.summary_a.avg_engagement_pct} valueB={comparison.summary_b.avg_engagement_pct} suffix="%" />
-      <Delta label="Median reach" valueA={comparison.summary_a.median_followers} valueB={comparison.summary_b.median_followers} />
+      {/* Every metric either column used to print as an absolute value in its
+       * own SummaryMetrics strip. That put 14 cells on the page to carry 7
+       * numbers, and put each delta in a different row from the two values it
+       * is the difference of. One surface now, showing both ends of the change. */}
+      <Delta label="Strong fits" valueA={a.n_strong} valueB={b.n_strong} format={INTEGER} />
+      <Delta label="Avg similarity" valueA={a.avg_match_pct} valueB={b.avg_match_pct} format={PERCENT} />
+      <Delta label="Avg engagement" valueA={a.avg_engagement_pct} valueB={b.avg_engagement_pct} format={PERCENT} />
+      <Delta label="Median reach" valueA={a.median_followers} valueB={b.median_followers} format={FOLLOWERS} />
+      <Delta label="Needs review" valueA={a.n_weak} valueB={b.n_weak} format={INTEGER} />
     </div>
   );
 }
 
-function Delta({ label, valueA, valueB, suffix = "" }: { label: string; valueA: number; valueB: number; suffix?: string }) {
+function Delta({ label, valueA, valueB, format }: { label: string; valueA: number; valueB: number; format: MetricFormat }) {
   const difference = valueB - valueA;
-  const display = `${difference > 0 ? "+" : ""}${Number.isInteger(difference) ? difference : difference.toFixed(1)}${suffix}`;
+  const direction = difference > 0 ? "delta-up" : difference < 0 ? "delta-down" : "";
   return (
     <div className="overview-delta">
       <span>{label}</span>
-      <strong className={difference > 0 ? "delta-up" : difference < 0 ? "delta-down" : ""}>{display}</strong>
-      <small>B vs A</small>
+      <strong className={direction}>{format.delta(difference)}</strong>
+      {/* Replaces a "B vs A" caption that named the direction without giving
+       * the reader either number, so a delta could not be interpreted. */}
+      <small>{format.value(valueA)} → {format.value(valueB)}</small>
     </div>
   );
 }
 
 function OverlapList({ comparison, details }: { comparison: Comparison; details: { a: RunDetail | null; b: RunDetail | null } }) {
-  if (!comparison.shared_creators.length) {
-    return <InfoNote title="No overlap">These runs do not share a ranked creator.</InfoNote>;
-  }
+  const shared = comparison.shared_creators;
   return (
     <div className="overlap-list">
-      <div className="section-heading compact"><div><p className="eyebrow">Overlap</p><h2>Creators in both runs</h2></div><span className="section-count">{comparison.shared_creators.length} shared</span></div>
-      <div className="overlap-items">
-        {comparison.shared_creators.map((creator) => (
-          <div className="overlap-item" key={creator.creator_key}>
-            <strong>{creator.handle}</strong>
-            <span>#{rankFor(details.a, creator.id)} <i>/</i> #{rankFor(details.b, creator.id)}</span>
+      <div className="section-heading compact"><div><p className="eyebrow">Overlap</p><h2>Creators in both runs</h2></div><span className="section-count">{shared.length} shared</span></div>
+      {/* No overlap is a result, not a system condition, so it reads as muted
+       * body text under the heading rather than as a note. It also used to
+       * return early, which removed this whole section and left the message
+       * floating alone with no heading above it. */}
+      {shared.length === 0
+        ? <p className="overlap-empty">These two runs do not share a ranked creator.</p>
+        : (
+          <div className="overlap-items">
+            {shared.map((creator) => (
+              <div className="overlap-item" key={creator.creator_key}>
+                <strong>{creator.handle}</strong>
+                <RankShift detailA={details.a} detailB={details.b} creatorId={creator.id} />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
     </div>
   );
 }
 
-function CompareColumn({ title, detail, summary, sharedKeys }: { title: string; detail: RunDetail | null; summary: Comparison["summary_a"]; sharedKeys: Set<string> }) {
+/** Rank in A against rank in B, with the movement spelled out. The chips used to
+ *  print "#3 / #7", which left the reader to work out that the creator dropped
+ *  four places -- the single most useful fact on the page, left as arithmetic. */
+function RankShift({ detailA, detailB, creatorId }: { detailA: RunDetail | null; detailB: RunDetail | null; creatorId: number }) {
+  const rankA = rankFor(detailA, creatorId);
+  const rankB = rankFor(detailB, creatorId);
+  if (rankA === "—" || rankB === "—") {
+    return <span>#{rankA} <i>/</i> #{rankB}</span>;
+  }
+  // Rank 1 is best, so a lower number in B is an improvement: a - b is positive
+  // when B climbed.
+  const climb = rankA - rankB;
+  return (
+    <span>
+      #{rankA} <i>→</i> #{rankB}
+      {climb !== 0 && (
+        <>{" "}<b className={climb > 0 ? "delta-up" : "delta-down"}>{climb > 0 ? "▲" : "▼"}{Math.abs(climb)}</b></>
+      )}
+    </span>
+  );
+}
+
+function CompareColumn({ title, detail, sharedKeys }: { title: string; detail: RunDetail | null; sharedKeys: Set<string> }) {
   return (
     <div className="compare-column">
-      <div className="compare-column-heading"><span className="eyebrow">{title}</span>{detail && <span>{detail.brief.goal}</span>}</div>
+      {/* Date and result count rather than the goal again: the goal is already
+       * on screen twice in the selects directly above, and it was a third and
+       * fourth time here, in full, one per column. */}
+      <div className="compare-column-heading">
+        <span className="eyebrow">{title}</span>
+        {detail && <span>{formatDate(detail.created_at)} · {detail.ranked.length} results</span>}
+      </div>
       {/* These columns were the only place in the app showing a run's quality
        * without its warnings, so a quota fallback on one side of the
        * comparison looked identical to a clean run. */}
       {detail && <WarningBanner warnings={detail.warnings} />}
-      <SummaryMetrics summary={summary} compact />
       {detail
         ? <ResultList run={detail} highlightKeys={sharedKeys} className="compare-result-list" />
         : <div className="empty-ledger">No run details loaded.</div>}

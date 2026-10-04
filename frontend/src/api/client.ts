@@ -14,16 +14,8 @@ const isLocalHost = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$
 export const isApiConfigured = Boolean(baseUrl) || (import.meta.env.DEV && isLocalHost);
 /** Cold-start budget for waking a sleeping free-tier service. */
 const backendWakeTimeoutMs = 120_000;
-/** A local API answers in milliseconds, so a long wait there is always a
- *  misconfiguration rather than a cold start. */
 const localWakeTimeoutMs = 10_000;
-
-/** A free-tier instance sleeps after 15 minutes idle and needs roughly a minute
- *  to come back, so an unbounded fetch leaves the user on a spinner with
- *  nothing to retry. Every request carries a ceiling and turns a hang into a
- *  message that names the likely cause. */
 const defaultRequestTimeoutMs = 30_000;
-/** Run detail and CSV export are the two reads that can outrun the default. */
 const slowRequestTimeoutMs = 90_000;
 
 function wakeTimeoutMs(): number {
@@ -58,9 +50,7 @@ async function authenticatedHeaders(init?: RequestInit) {
 }
 
 interface RequestOptions {
-  /** Abort after this long. Defaults to a fixed ceiling per endpoint. */
   timeoutMs?: number;
-  /** Caller-owned cancellation, e.g. when a component unmounts. */
   signal?: AbortSignal;
 }
 
@@ -92,8 +82,6 @@ async function fetchGuarded(
     return await fetch(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      // A caller-cancelled request is not a failure to report; let it through so
-      // the caller's own staleness check discards it.
       if (options.signal?.aborted) throw error;
       throw new ApiError(timeoutMessage(timeoutMs), 408, null);
     }
@@ -152,8 +140,6 @@ async function downloadFile(path: string, filename: string) {
     const payload = await readPayload(response);
     throw new ApiError(errorMessage(payload), response.status, payload);
   }
-  // Only blob() here, never readPayload(): a CSV body should not be buffered
-  // as a string just to be re-read as a blob.
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");
   link.href = url;

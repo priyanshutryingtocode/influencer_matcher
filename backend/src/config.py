@@ -27,12 +27,6 @@ RUN_SCHEMA_ON_STARTUP = os.environ.get("RUN_SCHEMA_ON_STARTUP", "false" if APP_E
 
 GEN_MODEL = "gemini-2.5-flash-lite"
 
-# Ceiling on the ranking response. Sized from the schema's worst case (a short
-# list, each entry carrying MAX_GROUNDING_PER_ENTRY citations of MAX_QUOTE_LENGTH
-# characters) plus headroom, because a response truncated mid-string cannot be
-# parsed and the whole ranking falls back to retrieval order. The free tier
-# meters requests per day rather than tokens, so the headroom is not charged
-# against the daily call budget.
 RANKING_MAX_OUTPUT_TOKENS = int(os.environ.get("RANKING_MAX_OUTPUT_TOKENS", "2048"))
 if RANKING_MAX_OUTPUT_TOKENS <= 0:
     raise RuntimeError("RANKING_MAX_OUTPUT_TOKENS must be a positive integer")
@@ -46,9 +40,6 @@ if EMBED_DIMENSIONS <= 0:
 EMBED_TASK_DOCUMENT = os.environ.get("EMBED_TASK_DOCUMENT", "RETRIEVAL_DOCUMENT")
 EMBED_TASK_QUERY = os.environ.get("EMBED_TASK_QUERY", "RETRIEVAL_QUERY")
 
-# Process-wide floor between embedding API calls. The free tier allows 100
-# requests/minute; the default keeps a bulk reindex near 60. Callers that pace
-# themselves (the evaluator) can set this to 0.
 EMBED_REQUEST_INTERVAL_SECONDS = float(os.environ.get("EMBED_REQUEST_INTERVAL_SECONDS", "1.0"))
 if EMBED_REQUEST_INTERVAL_SECONDS < 0:
     raise RuntimeError("EMBED_REQUEST_INTERVAL_SECONDS cannot be negative")
@@ -61,7 +52,6 @@ DEFAULT_TOP_N_RANKED = 5
 # brief was a short fixed label still validate when they are read back.
 MIN_GOAL_LENGTH = int(os.environ.get("MIN_GOAL_LENGTH", "8"))
 MAX_GOAL_LENGTH = int(os.environ.get("MAX_GOAL_LENGTH", "600"))
-# Advertised by /meta and enforced by BriefPayload, so they cannot drift.
 AUDIENCE_MAX_LENGTH = 300
 VIBE_MAX_LENGTH = 500
 if MIN_GOAL_LENGTH < 1 or MAX_GOAL_LENGTH < MIN_GOAL_LENGTH:

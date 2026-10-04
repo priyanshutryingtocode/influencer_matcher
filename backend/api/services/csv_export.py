@@ -4,10 +4,7 @@ import csv
 import io
 
 #: Column -> how to read it off (creator, ranked entry, rank).
-#:
-#: This replaces a 33-name CSV_COLUMNS list beside a 33-value writerow, which
-#: `csv.writer` matches by position. Add a column to one and forget the other
-#: and every later value silently shifts a column right.
+
 _CELL = {
     "rank": lambda c, e, r: r,
     "creator_key": lambda c, e, r: c.get("creator_key") or c.get("handle", ""),
@@ -57,8 +54,7 @@ def build_csv(run: dict) -> str:
     for rank, entry in enumerate(run["result"]["ranked"], start=1):
         creator = candidates.get(entry.get("id"))
         # A ranked entry whose snapshot is missing is skipped rather than
-        # raising. /runs/{id} already tolerates this by filtering, so the CSV
-        # export used to 500 where the JSON beside it returned 200.
+        # raising.
         if creator is None:
             continue
         writer.writerow([

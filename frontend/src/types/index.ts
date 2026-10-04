@@ -26,7 +26,6 @@ export interface MatchJob {
 export interface Grounding {
   /** Key of a profile field on the stored creator. */
   field: string;
-  /** Verbatim substring of that field, checked server-side before display. */
   quote: string;
 }
 
@@ -47,8 +46,6 @@ export interface CreatorSnapshot {
   brand_collaborations: string[];
   tags: string[];
   similarity: number | null;
-  /** Stored and displayable, but not quotable in a reason: these are not in
-   *  the embedded profile text, so retrieval never searched on them. */
   reach_ratio: number;
   sponsored_ratio: number;
   growth_trend: string;

@@ -13,7 +13,7 @@ from api.schemas.models import MetaDefaults, MetaLimits, MetaResponse
 
 VALID = {
     "platforms": ["Any", "Instagram"],
-    "defaults": {"goal": "", "audience": "Gen Z", "vibe": "warm", "top_k": 10, "top_n": 5},
+    "defaults": {"goal": "", "audience": "", "vibe": "", "top_k": 10, "top_n": 5},
     "limits": {
         "top_k_min": 1, "top_k_max": 50, "top_n_min": 1, "top_n_max": 50,
         "goal_min_length": 8, "goal_max_length": 600,

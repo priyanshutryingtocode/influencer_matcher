@@ -13,9 +13,6 @@ from . import config
 logger = logging.getLogger(__name__)
 
 _RETRY_MESSAGE_MS = re.compile(r"Please retry in ([\d.]+)s", re.IGNORECASE)
-# A per-day quota id looks like EmbedContentRequestsPerDayPerUser...-FreeTier.
-# Per-minute quota ids never contain "perday", which is what keeps the two
-# throttle kinds from being confused for each other.
 _DAILY_QUOTA_RE = re.compile(r"[A-Za-z0-9_-]*[Pp]er_?[Dd]ay[A-Za-z0-9_-]*")
 _QUOTA_VALUE_RE = re.compile(r"quota'?\"?\s*Value\s*\"?\s*[:=]\s*\"?(\d+)", re.IGNORECASE)
 _DAILY_RESET_HINT = "The counter resets at midnight Pacific; retrying now cannot help."

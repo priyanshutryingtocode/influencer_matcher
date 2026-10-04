@@ -1,8 +1,6 @@
 import { useBackend } from "../backend/BackendProvider";
 
-/** The wake control always renders, because the route gate is unconditional --
- *  hiding it behind a build flag left people stuck on "Backend resting" with no
- *  way to see or change the state. The flag only picks the wording. */
+
 const hint = import.meta.env.VITE_DEMO_MODE === "true"
   ? "Personal project demo. Free-tier hosting sleeps between visits; completed runs stay saved."
   : "Wakes the local API. The first request can take a moment if the server is starting.";

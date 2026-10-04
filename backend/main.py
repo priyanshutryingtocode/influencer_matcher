@@ -23,10 +23,6 @@ from src.match_service import rank_match, retrieve_candidates
 from src.models import Brief
 
 CACHE_DIR = Path(__file__).resolve().parent / ".embed-cache"
-# A cache this large is worth protecting, so warn when a run is about to spend
-# fresh requests. Mid-build is never mistaken for a mistake: a build in progress
-# reuses a growing *share* of the cache, whereas a corpus switch reuses almost
-# none of it on every run and every one of those vectors is wasted.
 _ORPHAN_WARN_MIN = 50
 _MIN_CACHE_REUSE_RATIO = 0.05
 
@@ -49,14 +45,22 @@ def positive_int(max_value: int | None = None):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Match brand briefs to influencers using Gemini + RAG.")
+    # A neutral example rather than the specific brand this file used to
+    # advertise, so a bare `python main.py` demos the same goal-only query shape
+    # the API and the evaluation use. Not empty: unlike the API path, nothing
+    # calls _validate_brief here, so a blank --goal would embed an empty query
+    # and fail deep inside the Gemini call instead of at the argument.
     parser.add_argument(
         "--goal",
-        default="a thrifted-vintage clothing label for Gen Z who care about slow fashion",
+        default="high-energy strength training for beginners",
         help="Free-text description of what the brand wants",
     )
     parser.add_argument("--platform", default="Instagram", choices=["Any", *PLATFORMS])
-    parser.add_argument("--audience", default="Gen Z")
-    parser.add_argument("--vibe", default="warm, friendly")
+    # Optional, and empty by default for the same reason as the API's meta
+    # defaults: Brief.query_text() folds a non-empty value into the embedded
+    # query, so any default here silently becomes part of every run's ranking.
+    parser.add_argument("--audience", default="")
+    parser.add_argument("--vibe", default="")
     parser.add_argument(
         "--count", type=positive_int(config.MAX_INFLUENCER_COUNT),
         default=config.DEFAULT_INFLUENCER_COUNT, help="Size of the synthetic database",
@@ -115,10 +119,8 @@ def ensure_indexed(args) -> None:
     here has touched the database yet, so existing indexed data survives.
     """
     # `--limit` is the only flag that can suppress a write, so it is checked on
-    # its own. It used to be `bool(args.limit) and not args.index_only`, which
-    # meant `--limit 5 --index-only` fell through to replace_influencers() and
-    # TRUNCATEd the live index down to 5 rows. `--limit` is documented as writing
-    # nothing, so it wins over --index-only regardless of how the two combine.
+    # its own.
+    
     embed_only = bool(args.limit)
     if args.limit and args.index_only:
         print(

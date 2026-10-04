@@ -30,8 +30,6 @@ def _configure_connection(conn: psycopg.Connection) -> None:
     try:
         conn.execute("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', false)")
     except psycopg.Error:
-        # Without iterative scan a filtered query returns fewer rows than asked
-        # for. Worth a log; the query is still correct, just smaller.
         logger.debug("hnsw.iterative_scan unavailable", exc_info=True)
 
 
@@ -266,8 +264,6 @@ def upsert_influencers(
             """,
             rows,
         )
-        # Written after the creators so the foreign key always resolves, even
-        # on a re-upsert where a signals row already exists.
         cur.executemany(
             """
             INSERT INTO creator_signals
@@ -330,7 +326,6 @@ def search(
             "SELECT set_config('hnsw.ef_search', %s, false)", (str(ef_search),)
         )
     except psycopg.Error:
-        # ef_search is a tuning knob; the query is correct without it.
         logger.debug("hnsw.ef_search tuning failed", exc_info=True)
 
     # One LEFT JOIN, not a second query: retrieval returns top_k rows and a

@@ -6,11 +6,10 @@ export function BackendGate() {
   return (
     <section className="backend-gate" aria-labelledby="backend-gate-title">
       <div className="backend-gate-panel">
-        <p className="eyebrow">Free-tier hosting</p>
+        <p className="eyebrow">Influencer Matcher</p>
         <h1 id="backend-gate-title">Backend resting</h1>
         <p className="backend-gate-copy">
-          This demo runs on a free service that sleeps when idle. Start it to load matches — the first
-          request usually takes about a minute.
+          This project runs on Render that sleeps when idle. Start it - should take around 30 seconds or a minute.
         </p>
         <button
           type="button"

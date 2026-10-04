@@ -47,9 +47,14 @@
   .main-nav { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; width: 100%; }
   .nav-link { flex: 1; justify-content: center; }
   .account-slot { grid-column: 2; grid-row: 1; }
-  .backend-status-label { display: none; }
+  /* Both controls already carry an aria-label, so display:none here cost nothing
+     accessible -- the name came from the attribute either way. What it did cost
+     was the visible text: the label survived in the DOM only as an attribute, so
+     nothing tied it to the word a sighted user actually reads and the two could
+     drift apart silently. Visually hidden keeps them bound. */
+  .backend-status-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .backend-status { gap: var(--space-1); padding: var(--space-1) var(--space-2); }
-  .account-trigger-name { display: none; }
+  .account-trigger-name { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .page-content { width: min(var(--content-width), calc(100% - var(--page-gutter) - var(--page-gutter))); padding-top: var(--space-6); }
   .page-intro { align-items: flex-start; flex-direction: column; gap: var(--space-3); }
   .page-intro-meta { justify-content: flex-start; }
@@ -73,7 +78,49 @@
   .swap-button { justify-self: start; }
   .compare-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-primary { grid-column: 1 / -1; border-bottom: 1px solid var(--rule); }
+  /* Five deltas across two columns leaves the last one orphaned beside an empty
+     cell; let it span instead. */
+  .overview-delta:last-child { grid-column: 1 / -1; border-left: 0; }
   .compare-columns { grid-template-columns: 1fr; gap: var(--space-6); }
+
+  /* Touch targets. Every control is 34px in the component layer, which is under
+     the 44px iOS and 48px Android minimums. Raised only at this breakpoint so
+     desktop density -- where the mouse makes a small target fine -- is
+     untouched. The similarity disclosure is deliberately excluded: it is a 13px
+     inline icon inside the summary strip, and a 44px box would triple the
+     strip's height. It gets a smaller bump instead (see the 480px block). */
+  .btn, .nav-link, .chip, .delete-button, .swap-button, .account-trigger,
+  .auth-mode-button, .backend-status, .account-menu-action { min-height: 44px; }
+
+  /* The two-row mobile topbar is ~122px tall once nav links hit 44px, which on a
+     667px phone is a sixth of the viewport permanently occluded by a header that
+     only holds a wordmark and three links. Let it scroll away. */
+  .topbar { position: static; }
+
+  /* .brand-name is nowrap, so the brand lockup cannot shrink below the width of
+     "Influencer Matcher" -- ~175px, plus the account slot, overflowed a 320px
+     viewport by a few pixels. Truncate instead of overflowing. */
+  .brand-lockup { max-width: 100%; }
+  .brand-name { overflow: hidden; text-overflow: ellipsis; }
+
+  /* 40px of top padding and 80px of bottom is a lot of scroll on a phone. */
+  .page-content { padding-top: var(--space-5); padding-bottom: var(--space-8); }
+
+  /* Free text in a non-wrapping flex row: a pasted URL or a long unbroken token
+     pushed these rows past the viewport, because a flex item's default
+     min-width:auto is its min-content width. */
+  .empty-steps { flex-wrap: wrap; gap: var(--space-2) var(--space-5); }
+  .compare-column-heading { flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+
+  /* These are grid items in the mobile result row's second column, which is only
+     ~240px wide at 320px; min-width:auto let them push instead of shrink. */
+  .result-fit, .result-metrics, .result-fit-line { min-width: 0; }
+
+  /* Mobile trims the history ledger's own padding, not just the layout around
+     it -- .history-open's 16px block plus the 1.5 body line-height made each row
+     ~105px, so ten runs filled two phone screens. */
+  .history-open { padding: var(--space-3) var(--space-3) var(--space-3) 0; }
+  .history-row-active { padding-left: var(--space-3); }
 }
 
 @media (max-width: 480px) {
@@ -96,6 +143,23 @@
   .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* 330px of dead vertical space for a two-line empty state on a phone. */
   .empty-state { min-height: 200px; }
+
+  /* Reclaim width on the narrowest phones. 1rem gutters cost 32px of a 320px
+     viewport and the rows above all sat within ~10px of overflowing. */
+  :root { --page-gutter: .875rem; }
+
+  /* A goal paragraph and an Export button cannot share 288px legibly -- the goal
+     was reduced to roughly 20 characters per line beside it. */
+  .run-context { flex-direction: column; align-items: stretch; gap: var(--space-3); }
+  .run-context .btn { width: 100%; }
+
+  /* The 13px inline disclosure gets a 24px box: still short of 44px, but
+     proportionate to the summary strip, where a 44px box would dominate it. */
+  .summary-explain-toggle { justify-content: center; min-width: 24px; min-height: 24px; }
+
+  /* The 360px cap is wider than the ~240px actually available here, so it never
+     bound anything; clearing it gives the reach-rate bar the full column. */
+  .result-metrics { max-width: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

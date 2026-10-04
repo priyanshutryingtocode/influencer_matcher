@@ -9,7 +9,9 @@
 .compare-loading { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-xs); }
 .loading-bar { width: 44px; height: 2px; background: var(--signal); animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
-.compare-overview { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); border-bottom: 1px solid var(--rule); }
+/* Six cells: the shared-creator count plus the five metrics the columns used to
+   print as absolute values in their own strips. */
+.compare-overview { display: grid; grid-template-columns: 1.4fr repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
 .overview-primary, .overview-delta { display: grid; gap: var(--space-2); padding: var(--space-5) var(--space-4); border-left: 1px solid var(--rule); }
 .overview-primary { border-left: 0; }
 .overview-primary > span, .overview-delta > span { color: var(--muted); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: .08em; }
@@ -19,17 +21,26 @@
 .delta-up { color: var(--signal); }
 .delta-down { color: var(--danger); }
 .overlap-list { display: grid; gap: var(--space-4); }
+/* Not .empty-ledger: that is display:grid and carries a bottom border, so on a
+   <p> it would be invalid nesting and would draw a rule under one sentence. */
+.overlap-empty { margin: 0; color: var(--muted); font-size: var(--text-sm); }
 .section-heading.compact h2 { font-size: var(--text-lg); }
 .overlap-items { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 .overlap-item { display: grid; gap: var(--space-2); min-width: 140px; padding: var(--space-3) var(--space-4); border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); }
 .overlap-item strong { font-size: var(--text-xs); }
 .overlap-item span { color: var(--muted); font-family: var(--font-mono); font-size: var(--text-2xs); }
 .overlap-item i { color: var(--rule-strong); font-style: normal; }
+/* The rank-movement arrow is a <b>, so it does not match the .overlap-item span
+   rule above and would inherit the 16px body size inside an 11.2px line. */
+.overlap-item b { font-size: var(--text-2xs); font-weight: 700; }
 .compare-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-9); }
 .compare-column { min-width: 0; }
 .compare-column-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .compare-column-heading { align-items: baseline; padding-bottom: var(--space-4); border-bottom: 1px solid var(--rule); color: var(--muted); font-size: var(--text-xs); }
 .compare-column-heading .eyebrow { margin: 0; }
-.compare-column-heading > span:last-child { color: var(--muted-strong); }
+/* Free-text goal beside a nowrap eyebrow. As a flex item the goal span sized to
+   its min-content width, so a long goal -- or a pasted URL with no break
+   opportunities -- pushed the heading past the viewport. */
+.compare-column-heading > span:last-child { min-width: 0; overflow-wrap: anywhere; color: var(--muted-strong); }
 .compare-result-list .result-row { grid-template-columns: 34px minmax(0, 1fr) 120px 150px; }
 .compare-result-list .result-rationale { grid-column: 2 / -1; }
